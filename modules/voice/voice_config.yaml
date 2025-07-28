@@ -1,0 +1,167 @@
+# Voice Module Configuration for SAGE
+
+recognition:
+  # Engine options: whisper, google, vosk, sphinx
+  engine: whisper
+  
+  # Whisper specific settings
+  whisper:
+    model: tiny  # tiny, base, small, medium, large
+    device: cpu  # cpu, cuda
+    language: en
+    
+  # Google Speech Recognition settings  
+  google:
+    language: en-US
+    timeout: 5
+    phrase_time_limit: 10
+    
+  # Vosk settings (offline)
+  vosk:
+    model_path: data/models/vosk
+    sample_rate: 16000
+    
+  # Common settings
+  energy_threshold: 300
+  dynamic_energy_threshold: true
+  pause_threshold: 0.8
+  operation_timeout: 5
+  
+synthesis:
+  # Engine options: pyttsx3, edge-tts, espeak
+  engine: pyttsx3
+  
+  # pyttsx3 settings
+  pyttsx3:
+    voice: default  # default, male, female, or specific voice ID
+    rate: 200       # words per minute
+    volume: 0.8     # 0.0 to 1.0
+    
+  # edge-tts settings (Microsoft free TTS)
+  edge_tts:
+    voice: en-US-AriaNeural
+    rate: +0%
+    volume: +0%
+    
+  # Common settings
+  interrupt_on_new: true
+  queue_enabled: false
+
+wake_word:
+  enabled: true
+  
+  # Wake word detection engine: porcupine, snowboy
+  engine: porcupine
+  
+  # Porcupine settings (free tier: 3 keywords)
+  porcupine:
+    keywords:
+      - sage
+      - computer
+      - assistant
+    sensitivity: 0.5  # 0.0 to 1.0
+    
+  # Snowboy settings (deprecated but still works)
+  snowboy:
+    model_path: data/models/snowboy/sage.pmdl
+    sensitivity: 0.5
+    
+  # Common settings
+  continuous_listening: true
+  timeout_after_detection: 30  # seconds
+
+audio:
+  # Audio input settings
+  input:
+    device_index: null  # null for default, or specific device index
+    sample_rate: 16000
+    chunk_size: 1024
+    channels: 1
+    format: int16
+    
+  # Audio output settings  
+  output:
+    device_index: null
+    
+  # Audio processing
+  processing:
+    noise_reduction: true
+    auto_gain_control: true
+    echo_cancellation: false
+    vad_enabled: true  # Voice Activity Detection
+    vad_aggressiveness: 2  # 0-3, higher = more aggressive
+    
+  # Volume and sensitivity
+  volume:
+    input_gain: 1.0
+    output_gain: 1.0
+    silence_threshold: 500
+    
+# Performance settings
+performance:
+  # Enable caching for recognition results
+  cache_enabled: true
+  cache_ttl: 3600  # 1 hour
+  
+  # Threading settings
+  use_threading: true
+  max_workers: 2
+  
+  # Model loading
+  lazy_loading: true  # Load models only when needed
+  model_cache_size: 3  # Number of models to keep in memory
+  
+# Debug and logging
+debug:
+  enabled: false
+  log_audio_stats: false
+  save_audio_files: false
+  audio_log_dir: data/logs/audio
+  
+# Language and localization
+language:
+  primary: en
+  fallback: en-US
+  supported_languages:
+    - en
+    - en-US
+    - en-GB
+    
+# Advanced features
+features:
+  # Continuous conversation mode
+  continuous_mode: false
+  continuous_timeout: 60
+  
+  # Command shortcuts
+  shortcuts_enabled: true
+  
+  # Voice training
+  voice_training: false
+  training_data_dir: data/voice_training
+  
+  # Noise adaptation
+  noise_adaptation: true
+  adaptation_duration: 5  # seconds
+  
+# Error handling
+error_handling:
+  max_retries: 3
+  retry_delay: 1.0
+  fallback_to_text: true
+  
+# Integration settings  
+integration:
+  # Hot word detection during conversation
+  wake_word_during_conversation: false
+  
+  # Interrupt current TTS when new command detected
+  interrupt_tts_on_command: true
+  
+  # Queue management
+  command_queue_size: 10
+  priority_commands:
+    - stop
+    - pause
+    - help
+    - emergency

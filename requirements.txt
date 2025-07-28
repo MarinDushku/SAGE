@@ -1,0 +1,82 @@
+# SAGE - Smart Adaptive General Executive
+# Zero-cost AI assistant requirements
+
+# Core dependencies
+asyncio-mqtt==0.16.1
+pyyaml==6.0.1
+psutil==5.9.6
+aiofiles==23.2.1
+click==8.1.7
+
+# Voice module (FREE)
+SpeechRecognition==3.10.0
+pyttsx3==2.90
+pyaudio==0.2.11
+webrtcvad==2.0.10
+pvporcupine==3.0.0
+openai-whisper==20231117
+vosk==0.3.45
+
+# Vision module (FREE)
+opencv-python==4.8.1.78
+face-recognition==1.3.0
+ultralytics==8.0.196
+pytesseract==0.3.10
+easyocr==1.7.0
+pillow==10.0.0
+
+# NLP/AI module (FREE - Local models)
+spacy==3.7.2
+nltk==3.8.1
+transformers==4.35.0
+torch==2.1.0
+gpt4all==2.0.2
+llama-cpp-python==0.2.11
+
+# Database (FREE)
+sqlite3
+tinydb==4.8.0
+
+# Web tools (FREE)
+beautifulsoup4==4.12.2
+requests==2.31.0
+selenium==4.15.2
+duckduckgo-search==3.9.6
+googlesearch-python==1.2.3
+
+# GUI (FREE)
+PyQt5==5.15.10
+customtkinter==5.2.0
+
+# Integration (FREE)
+openpyxl==3.1.2
+python-docx==0.8.11
+pyautogui==0.9.54
+keyboard==0.13.5
+mouse==0.7.1
+watchdog==3.0.0
+
+# 3D/Fabrication (FREE)
+trimesh==4.0.4
+numpy-stl==3.0.1
+pyclipper==1.3.0.post4
+
+# Additional utilities
+numpy==1.24.3
+pandas==2.0.3
+matplotlib==3.7.2
+scipy==1.11.3
+scikit-learn==1.3.0
+python-dateutil==2.8.2
+pytz==2023.3
+cachetools==5.3.2
+concurrent-futures==3.1.1
+
+# Development dependencies (optional)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+black==23.9.1
+flake8==6.1.0
+mypy==1.6.1
+pre-commit==3.5.0

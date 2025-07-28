@@ -1,0 +1,108 @@
+# SAGE - Smart Adaptive General Executive
+# Git ignore file for zero-cost AI assistant
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# SAGE specific
+data/logs/
+data/cache/
+data/user_data/
+data/models/
+*.log
+
+# Configuration with secrets (keep example files)
+config.yaml
+.env
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Audio files (can be large)
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# Model files (download on setup)
+*.pth
+*.bin
+*.onnx
+*.pkl
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Jupyter
+.ipynb_checkpoints/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Profiling
+*.prof
+
+# Local test files
+test_output/
+debug/
+
+# Backup files
+*.bak
+*.backup
