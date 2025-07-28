@@ -57,7 +57,7 @@ core, priority:high, cost:free
 
 ## 📅 Milestone
 Core Infrastructure (Week 1)""",
-                "labels": ["core", "priority:high", "cost:free", "completed"]
+                "labels": ["core", "priority:high", "cost:free", "status:completed"]
             },
             
             {
@@ -229,7 +229,7 @@ core, optimization:memory, cost:free
 
 ## 📅 Milestone
 Core Infrastructure (Week 1)""",
-                "labels": ["core", "optimization:memory", "cost:free", "completed"]
+                "labels": ["core", "optimization:memory", "cost:free", "status:completed"]
             },
             
             # Milestone 2: Voice Module (Week 2-3)
