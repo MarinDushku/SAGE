@@ -37,6 +37,7 @@ class EventType(Enum):
     ERROR_OCCURRED = "system.error"
     RESOURCE_WARNING = "system.resource_warning"
     SHUTDOWN_REQUESTED = "system.shutdown"
+    SYSTEM_SHUTDOWN = "system.shutdown_immediate"
 
 
 @dataclass
