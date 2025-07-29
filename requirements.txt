@@ -18,24 +18,23 @@ openai-whisper==20231117
 vosk==0.3.45
 
 # Vision module (FREE)
-opencv-python==4.8.1.78
-face-recognition==1.3.0
-ultralytics==8.0.196
-pytesseract==0.3.10
-easyocr==1.7.0
-pillow==10.0.0
+opencv-python>=4.8.0
+face-recognition>=1.3.0
+ultralytics>=8.1.0
+pytesseract>=0.3.10
+easyocr>=1.7.0
+pillow>=10.0.0
 
 # NLP/AI module (FREE - Local models)
-spacy==3.7.2
-nltk==3.8.1
-transformers==4.35.0
-torch==2.1.0
-gpt4all==2.0.2
-llama-cpp-python==0.2.11
+spacy>=3.7.0
+nltk>=3.8.1
+transformers>=4.35.0
+torch>=2.2.0
+gpt4all>=2.0.0
+llama-cpp-python>=0.2.0
 
 # Database (FREE)
-sqlite3
-tinydb==4.8.0
+tinydb>=4.8.0
 
 # Web tools (FREE)
 beautifulsoup4==4.12.2

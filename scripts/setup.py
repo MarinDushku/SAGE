@@ -22,6 +22,9 @@ class SAGESetup:
         self.architecture = platform.machine().lower()
         self.sage_root = Path(__file__).parent.parent
         self.venv_path = self.sage_root / "venv"
+        self.minimal = False
+        self.skip_ollama = False
+        self.skip_models = False
         
     def print_banner(self):
         """Print SAGE setup banner"""
@@ -81,28 +84,35 @@ class SAGESetup:
         
         if self.system == "linux":
             # Ubuntu/Debian dependencies
-            deps = [
-                "sudo", "apt", "update", "&&",
-                "sudo", "apt", "install", "-y",
-                "python3-dev",
-                "python3-pip", 
-                "portaudio19-dev",
-                "espeak-ng",
-                "espeak-ng-data",
-                "tesseract-ocr",
-                "tesseract-ocr-eng",
-                "ffmpeg",
-                "libportaudio2",
-                "libasound2-dev"
-            ]
-            
+            print("Installing basic system dependencies...")
             try:
-                subprocess.run(deps, check=True)
-                print("✅ System dependencies installed")
-            except subprocess.CalledProcessError:
-                print("⚠️  Some system dependencies may not have installed")
+                # Update package list first
+                subprocess.run(["sudo", "apt", "update"], check=True)
+                
+                # Install essential dependencies
+                essential_deps = [
+                    "python3-dev", "python3-pip", "build-essential"
+                ]
+                subprocess.run(["sudo", "apt", "install", "-y"] + essential_deps, check=True)
+                print("✅ Essential system dependencies installed")
+                
+                # Try to install optional audio/vision dependencies
+                optional_deps = [
+                    "portaudio19-dev", "espeak-ng", "tesseract-ocr", "ffmpeg"
+                ]
+                try:
+                    subprocess.run(["sudo", "apt", "install", "-y"] + optional_deps, check=True)
+                    print("✅ Optional dependencies installed")
+                except subprocess.CalledProcessError:
+                    print("⚠️  Some optional dependencies may not have installed")
+                    print("For voice features, install manually:")
+                    print("  sudo apt install portaudio19-dev espeak-ng tesseract-ocr ffmpeg")
+                    
+            except subprocess.CalledProcessError as e:
+                print("⚠️  System dependency installation had issues")
                 print("Please install manually if needed:")
-                print("  sudo apt install python3-dev portaudio19-dev espeak-ng tesseract-ocr ffmpeg")
+                print("  sudo apt update")
+                print("  sudo apt install python3-dev build-essential")
                 
         elif self.system == "darwin":  # macOS
             print("Please install Homebrew dependencies manually:")
@@ -113,12 +123,16 @@ class SAGESetup:
             print("  - Microsoft Visual C++ Build Tools")
             print("  - Tesseract OCR (https://github.com/UB-Mannheim/tesseract/wiki)")
             
-    def install_python_dependencies(self):
+    def install_python_dependencies(self, minimal=False):
         """Install Python dependencies"""
-        print("📚 Installing Python dependencies...")
+        if minimal:
+            print("📚 Installing minimal Python dependencies...")
+            requirements_file = self.sage_root / "requirements-minimal.txt"
+        else:
+            print("📚 Installing full Python dependencies...")
+            requirements_file = self.sage_root / "requirements.txt"
         
         pip_path = self.get_pip_path()
-        requirements_file = self.sage_root / "requirements.txt"
         
         if not requirements_file.exists():
             print(f"❌ Requirements file not found: {requirements_file}")
@@ -140,9 +154,13 @@ class SAGESetup:
             
         except subprocess.CalledProcessError as e:
             print(f"❌ Failed to install Python dependencies: {e}")
-            print("Try installing manually with:")
-            print(f"  {pip_path} install -r {requirements_file}")
-            return False
+            if not minimal:
+                print("\n🔄 Trying minimal installation...")
+                return self.install_python_dependencies(minimal=True)
+            else:
+                print("Try installing manually with:")
+                print(f"  {pip_path} install -r {requirements_file}")
+                return False
             
     def install_ollama(self):
         """Install Ollama for local LLM"""
@@ -388,17 +406,26 @@ cd "{self.sage_root}"
         if not self.create_virtual_environment():
             return False
             
-        self.install_system_dependencies()
+        if not self.minimal:
+            self.install_system_dependencies()
+        else:
+            print("🔧 Skipping system dependencies (minimal install)")
         
-        if not self.install_python_dependencies():
+        if not self.install_python_dependencies(minimal=self.minimal):
             return False
             
-        # AI models setup
-        if not self.install_ollama():
-            print("⚠️  Continuing without Ollama")
+        # AI models setup (skip if requested)
+        if not self.skip_ollama and not self.minimal:
+            if not self.install_ollama():
+                print("⚠️  Continuing without Ollama")
+        else:
+            print("🤖 Skipping Ollama installation")
             
-        self.download_ai_models()
-        self.download_whisper_models()
+        if not self.skip_models and not self.minimal:
+            self.download_ai_models()
+            self.download_whisper_models()
+        else:
+            print("📥 Skipping AI model downloads")
         
         # Configuration
         self.create_config_files()
@@ -430,6 +457,22 @@ cd "{self.sage_root}"
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="SAGE Setup Script")
+    parser.add_argument("--minimal", action="store_true", 
+                       help="Install only minimal dependencies for core functionality")
+    parser.add_argument("--skip-ollama", action="store_true",
+                       help="Skip Ollama installation")
+    parser.add_argument("--skip-models", action="store_true", 
+                       help="Skip AI model downloads")
+    
+    args = parser.parse_args()
+    
     setup = SAGESetup()
+    setup.minimal = args.minimal
+    setup.skip_ollama = args.skip_ollama  
+    setup.skip_models = args.skip_models
+    
     success = setup.run_setup()
     sys.exit(0 if success else 1)
