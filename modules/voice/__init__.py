@@ -4,7 +4,7 @@ Voice Module - Speech recognition and synthesis for SAGE
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from modules import BaseModule, EventType, Event
 
@@ -142,21 +142,34 @@ class VoiceModule(BaseModule):
             return None
             
     async def _handle_speak_request(self, event: Event) -> bool:
-        """Handle text-to-speech requests"""
+        """Handle enhanced text-to-speech requests"""
         try:
             text = event.data.get('text', '')
             voice_config = event.data.get('voice_config', {})
+            profile = event.data.get('profile', 'default')
+            priority = event.data.get('priority', 'normal')
+            emotion = event.data.get('emotion')
+            intensity = event.data.get('intensity', 1.0)
             
             if not text:
                 self.log("Empty text in speak request", "warning")
                 return False
                 
-            if self.synthesis_engine:
-                success = await self.synthesis_engine.speak(text, voice_config)
-                return success
-            else:
+            if not self.synthesis_engine:
                 self.log("Synthesis engine not available", "error")
                 return False
+                
+            # Handle different types of speech requests
+            if emotion:
+                success = await self.synthesis_engine.speak_with_emotion(text, emotion, intensity)
+            elif profile == 'notification':
+                success = await self.synthesis_engine.speak_notification(text)
+            elif profile == 'alert':
+                success = await self.synthesis_engine.speak_alert(text)
+            else:
+                success = await self.synthesis_engine.speak(text, voice_config, profile, priority)
+                
+            return success
                 
         except Exception as e:
             self.log(f"Error in speak request: {e}", "error")
@@ -340,19 +353,101 @@ class VoiceModule(BaseModule):
             self.log(f"Error in single recognition: {e}", "error")
             return None
             
-    async def speak_text(self, text: str, voice_config: Optional[Dict[str, Any]] = None) -> bool:
-        """Synthesize and speak text"""  
+    async def speak_text(self, text: str, voice_config: Optional[Dict[str, Any]] = None, 
+                        profile: str = 'default', priority: str = 'normal') -> bool:
+        """Synthesize and speak text with advanced options"""  
         try:
             if not self.synthesis_engine:
                 self.log("Synthesis engine not available", "error")
                 return False
                 
-            result = await self.synthesis_engine.speak(text, voice_config)
+            result = await self.synthesis_engine.speak(text, voice_config, profile, priority)
             return result
             
         except Exception as e:
             self.log(f"Error speaking text: {e}", "error")
             return False
+            
+    async def speak_with_emotion(self, text: str, emotion: str, intensity: float = 1.0) -> bool:
+        """Speak text with specific emotion and intensity"""
+        try:
+            if not self.synthesis_engine:
+                self.log("Synthesis engine not available", "error")
+                return False
+                
+            result = await self.synthesis_engine.speak_with_emotion(text, emotion, intensity)
+            return result
+            
+        except Exception as e:
+            self.log(f"Error speaking with emotion: {e}", "error")
+            return False
+            
+    async def speak_notification(self, text: str) -> bool:
+        """Speak notification using optimized notification profile"""
+        try:
+            if not self.synthesis_engine:
+                self.log("Synthesis engine not available", "error")
+                return False
+                
+            result = await self.synthesis_engine.speak_notification(text)
+            return result
+            
+        except Exception as e:
+            self.log(f"Error speaking notification: {e}", "error")
+            return False
+            
+    async def speak_alert(self, text: str) -> bool:
+        """Speak urgent alert with high priority"""
+        try:
+            if not self.synthesis_engine:
+                self.log("Synthesis engine not available", "error")
+                return False
+                
+            result = await self.synthesis_engine.speak_alert(text)
+            return result
+            
+        except Exception as e:
+            self.log(f"Error speaking alert: {e}", "error")
+            return False
+            
+    async def get_available_voices(self) -> List[Dict[str, Any]]:
+        """Get list of available voices across all TTS engines"""
+        try:
+            if not self.synthesis_engine:
+                return []
+                
+            return self.synthesis_engine.get_available_voices()
+            
+        except Exception as e:
+            self.log(f"Error getting available voices: {e}", "error")
+            return []
+            
+    async def set_voice_profile(self, profile_name: str, profile_config: Dict[str, Any]) -> bool:
+        """Set or update a voice profile"""
+        try:
+            if not self.synthesis_engine:
+                self.log("Synthesis engine not available", "error")
+                return False
+                
+            await self.synthesis_engine.set_voice_profile(profile_name, profile_config)
+            self.log(f"Voice profile '{profile_name}' updated")
+            return True
+            
+        except Exception as e:
+            self.log(f"Error setting voice profile: {e}", "error")
+            return False
+            
+    async def get_voice_profiles(self) -> Dict[str, Dict[str, Any]]:
+        """Get all available voice profiles"""
+        try:
+            if not self.synthesis_engine:
+                return {}
+                
+            return await self.synthesis_engine.get_voice_profiles()
+            
+        except Exception as e:
+            self.log(f"Error getting voice profiles: {e}", "error")
+            return {}
 
 
 __all__ = ['VoiceModule']
