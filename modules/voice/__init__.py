@@ -79,6 +79,17 @@ class VoiceModule(BaseModule):
                     component_names = ["recognition", "synthesis", "wake_word", "audio"]
                     self.log(f"Failed to initialize {component_names[i]}: {result}", "error")
                     
+            # Set up recognition callbacks
+            if self.recognition_engine:
+                self.recognition_engine.set_callbacks(
+                    on_text_recognized=self._on_text_recognized,
+                    on_error=self._on_recognition_error
+                )
+                
+            # Set up wake word callback
+            if self.wake_word_detector:
+                self.wake_word_detector.set_callback(self._on_wake_word_detected)
+                    
             self.is_loaded = True
             self.log("Voice module initialized successfully")
             return True
@@ -236,6 +247,112 @@ class VoiceModule(BaseModule):
         except Exception as e:
             self.log(f"Error getting voice status: {e}", "error")
             return {"error": str(e)}
+            
+    # Callback methods for voice events
+    async def _on_text_recognized(self, text: str, confidence: float):
+        """Handle recognized speech text"""
+        try:
+            import time
+            self.log(f"Speech recognized: '{text}' (confidence: {confidence:.2f})")
+            
+            # Emit voice command event
+            self.emit_event(EventType.VOICE_COMMAND, {
+                'command': text,
+                'confidence': confidence,
+                'timestamp': time.time(),
+                'source': 'voice_recognition'
+            })
+            
+        except Exception as e:
+            self.log(f"Error handling recognized text: {e}", "error")
+            
+    async def _on_recognition_error(self, error: str):
+        """Handle recognition errors"""
+        self.log(f"Recognition error: {error}", "error")
+        
+        # Emit error event
+        import time
+        self.emit_event(EventType.SYSTEM_ERROR, {
+            'error': error,
+            'component': 'voice_recognition',
+            'timestamp': time.time()
+        })
+        
+    async def _on_wake_word_detected(self):
+        """Handle wake word detection"""
+        self.log("Wake word detected - activating voice recognition")
+        
+        # Start listening for voice commands
+        if self.recognition_engine:
+            await self.recognition_engine.start_listening()
+            
+        # Emit wake word event
+        import time
+        self.emit_event(EventType.WAKE_WORD_DETECTED, {
+            'timestamp': time.time(),
+            'keyword': self.wake_word_detector.keyword if self.wake_word_detector else 'unknown'
+        })
+        
+    # Voice control methods
+    async def start_voice_recognition(self) -> bool:
+        """Start continuous voice recognition"""
+        try:
+            if not self.recognition_engine:
+                self.log("Recognition engine not available", "error")
+                return False
+                
+            result = await self.recognition_engine.start_listening()
+            if result:
+                self.log("Voice recognition started")
+            return result
+            
+        except Exception as e:
+            self.log(f"Error starting voice recognition: {e}", "error")
+            return False
+            
+    async def stop_voice_recognition(self) -> bool:
+        """Stop voice recognition"""
+        try:
+            if not self.recognition_engine:
+                return True
+                
+            result = await self.recognition_engine.stop_listening()
+            if result:
+                self.log("Voice recognition stopped")
+            return result
+            
+        except Exception as e:
+            self.log(f"Error stopping voice recognition: {e}", "error")
+            return False
+            
+    async def recognize_once(self, timeout: float = 5.0) -> Optional[str]:
+        """Recognize speech from a single input"""
+        try:
+            if not self.recognition_engine:
+                return None
+                
+            result = await self.recognition_engine.recognize_once(timeout)
+            if result:
+                self.log(f"Single recognition result: '{result}'")
+            return result
+            
+        except Exception as e:
+            self.log(f"Error in single recognition: {e}", "error")
+            return None
+            
+    async def speak_text(self, text: str, voice_config: Optional[Dict[str, Any]] = None) -> bool:
+        """Synthesize and speak text"""  
+        try:
+            if not self.synthesis_engine:
+                self.log("Synthesis engine not available", "error")
+                return False
+                
+            result = await self.synthesis_engine.speak(text, voice_config)
+            return result
+            
+        except Exception as e:
+            self.log(f"Error speaking text: {e}", "error")
+            return False
 
 
 __all__ = ['VoiceModule']
