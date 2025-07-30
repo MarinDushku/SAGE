@@ -616,6 +616,79 @@ class CalendarModule(BaseModule):
             conn.close()
             return events
     
+    async def handle_natural_language(self, text: str) -> Dict[str, Any]:
+        """Handle natural language calendar requests"""
+        try:
+            text_lower = text.lower()
+            
+            # Check for schedule/meeting keywords
+            if any(word in text_lower for word in ['schedule', 'meeting', 'appointment', 'remind', 'event']):
+                # Try to parse the request
+                parsed = self.parser.parse_datetime(text)
+                
+                if parsed['datetime']:
+                    # Extract title from text
+                    title = self._extract_title_from_text(text)
+                    
+                    # Create event
+                    event = CalendarEvent(
+                        title=title or "New Event",
+                        start_time=parsed['datetime'],
+                        end_time=parsed['datetime'] + 3600,  # 1 hour default
+                        description=f"Event created from: {text}",
+                        location="",
+                        reminder_minutes=15
+                    )
+                    
+                    # Add to calendar
+                    success = await self.add_event(event)
+                    
+                    if success:
+                        return {
+                            'success': True,
+                            'event_created': True,
+                            'event': {
+                                'title': event.title,
+                                'start_time': time.strftime('%Y-%m-%d %H:%M', time.localtime(event.start_time)),
+                                'reminder': f"{event.reminder_minutes} minutes before"
+                            },
+                            'message': f"Scheduled '{event.title}' for {time.strftime('%Y-%m-%d %H:%M', time.localtime(event.start_time))}"
+                        }
+                
+            return {
+                'success': False,
+                'event_created': False,
+                'message': "Could not parse calendar request. Try: 'Schedule meeting tomorrow at 2pm'"
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'event_created': False,
+                'error': str(e),
+                'message': "Error processing calendar request"
+            }
+    
+    def _extract_title_from_text(self, text: str) -> str:
+        """Extract event title from natural language text"""
+        # Simple title extraction
+        text_lower = text.lower()
+        
+        # Remove common schedule words
+        for word in ['schedule', 'add', 'create', 'set up', 'book', 'plan']:
+            text_lower = text_lower.replace(word, '')
+        
+        # Remove time-related words
+        for word in ['tomorrow', 'today', 'next week', 'at', 'pm', 'am', 'o\\'clock']:
+            text_lower = text_lower.replace(word, '')
+        
+        # Clean up and capitalize
+        title = text_lower.strip()
+        if not title:
+            title = "Meeting"
+        
+        return title.title()
+
     async def _reminder_loop(self):
         """Background loop to check for due reminders"""
         while True:

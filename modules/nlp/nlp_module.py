@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
 from modules import BaseModule, EventType, Event
+from modules.time_utils import TimeUtils
 
 # Try to import HTTP client for Ollama API
 try:
@@ -64,6 +65,9 @@ class NLPModule(BaseModule):
         
         # LLM response cache for performance optimization
         self.llm_cache = None
+        
+        # Time utilities
+        self.time_utils = TimeUtils()
         
         # Statistics
         self.stats = {
@@ -173,6 +177,22 @@ class NLPModule(BaseModule):
             if not self.is_initialized:
                 raise RuntimeError("NLP module not initialized")
                 
+            # Check for time queries first
+            time_response = self._handle_time_query(text)
+            if time_response:
+                response_time = time.time() - start_time
+                self._update_stats(response_time, True)
+                
+                return {
+                    'success': True,
+                    'response': {'text': time_response},
+                    'context': context or {},
+                    'processing_time': response_time,
+                    'model_used': 'time_utils',
+                    'provider': 'local',
+                    'cached': False
+                }
+            
             # Prepare context
             full_context = self._prepare_context(text, context)
             
@@ -688,3 +708,39 @@ class NLPModule(BaseModule):
         except Exception as e:
             self.log(f"Failed to initialize LLM cache: {e}", "warning")
             self.llm_cache = None
+    
+    def _handle_time_query(self, text: str) -> Optional[str]:
+        """Handle time-related queries"""
+        try:
+            text_lower = text.lower().strip()
+            
+            # Check for time-related keywords
+            time_keywords = [
+                'what time is it', 'current time', 'what time', 'time is it',
+                'what\\'s the time', 'tell me the time', 'time now', 'current time'
+            ]
+            
+            location_keywords = ['in', 'at', 'for']
+            
+            # Check if this is a time query
+            is_time_query = any(keyword in text_lower for keyword in time_keywords)
+            
+            if is_time_query:
+                # Extract location if specified
+                location = None
+                for loc_keyword in location_keywords:
+                    if loc_keyword in text_lower:
+                        # Try to extract location after the keyword
+                        parts = text_lower.split(loc_keyword)
+                        if len(parts) > 1:
+                            location = parts[-1].strip()
+                            break
+                
+                # Get time information
+                time_data = self.time_utils.get_current_time(location)
+                return self.time_utils.format_time_response(time_data)
+            
+            return None
+            
+        except Exception as e:
+            return f"Sorry, I had trouble getting the time: {e}"
