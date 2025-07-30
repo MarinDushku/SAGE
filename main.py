@@ -240,6 +240,20 @@ class SAGEApplication:
             # Print status information
             self._print_status()
             
+            # Welcome message
+            print("\n🤖 Hello! I'm SAGE, your AI assistant.")
+            print("💬 What can I help you with today?")
+            print("📝 You can:")
+            print("   • Ask me questions")
+            print("   • Schedule calendar events")
+            print("   • Have conversations that I'll remember")
+            print("   • Use voice commands (if microphone available)")
+            print("\n💡 Try running 'python demo_sage.py' in another terminal for interactive mode!")
+            print("-" * 60)
+            
+            # Speak welcome message
+            await self._speak_welcome_message()
+            
             # Main event loop
             while self.running and not self.shutdown_event.is_set():
                 try:
@@ -266,6 +280,28 @@ class SAGEApplication:
         finally:
             await self.shutdown()
             
+    async def _speak_welcome_message(self) -> None:
+        """Speak a welcome message using voice synthesis"""
+        try:
+            if not self.plugin_manager:
+                return
+                
+            voice_module = self.plugin_manager.get_module('voice')
+            if voice_module and hasattr(voice_module, 'speak_text'):
+                welcome_text = "Hello! I'm SAGE, your AI assistant. What can I help you with today?"
+                
+                # Try to speak the welcome message
+                result = await voice_module.speak_text(welcome_text)
+                
+                if result:
+                    print("🔊 Spoken welcome message delivered!")
+                else:
+                    print("🔇 Voice synthesis unavailable (audio hardware not accessible)")
+                    
+        except Exception as e:
+            print(f"🔇 Could not speak welcome message: {e}")
+            print("   Note: This is normal in WSL or systems without audio hardware")
+    
     def _print_status(self) -> None:
         """Print current SAGE status"""
         try:

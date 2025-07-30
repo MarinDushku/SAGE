@@ -3,7 +3,6 @@ Resource Monitor - System resource monitoring and management for SAGE
 """
 
 import asyncio
-import psutil
 import sys
 import time
 import tracemalloc
@@ -16,6 +15,14 @@ import logging
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
+
+# Try to import psutil, provide fallback if not available
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    psutil = None
 
 
 @dataclass
@@ -120,7 +127,13 @@ class ResourceMonitor:
         self.running = False
         self.monitor_task: Optional[asyncio.Task] = None
         self.logger = logging.getLogger(__name__)
-        self.sage_process = psutil.Process()
+        
+        if PSUTIL_AVAILABLE:
+            self.sage_process = psutil.Process()
+            self.network_baseline = psutil.net_io_counters()
+        else:
+            self.sage_process = None
+            self.network_baseline = None
         
         # Statistics tracking
         self.stats = {
@@ -130,9 +143,6 @@ class ResourceMonitor:
             'snapshots_taken': 0,
             'profiling_sessions': 0
         }
-        
-        # Network baseline
-        self.network_baseline = psutil.net_io_counters()
         
     def register_module(self, module_name: str, module_instance: Any, quota: Optional[ResourceQuota] = None):
         """Register a module for resource tracking"""
@@ -310,6 +320,24 @@ class ResourceMonitor:
     async def _take_snapshot(self) -> ResourceSnapshot:
         """Take a snapshot of current system resources"""
         try:
+            if not PSUTIL_AVAILABLE:
+                # Return minimal snapshot when psutil is not available
+                snapshot = ResourceSnapshot(
+                    timestamp=time.time(),
+                    cpu_percent=0.0,
+                    memory_percent=0.0,
+                    memory_mb=0.0,
+                    disk_usage_percent=0.0,
+                    network_bytes_sent=0,
+                    network_bytes_recv=0,
+                    process_count=0,
+                    sage_memory_mb=0.0,
+                    sage_cpu_percent=0.0,
+                    module_resources={}
+                )
+                self.stats['snapshots_taken'] += 1
+                return snapshot
+            
             # System resources
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
@@ -317,8 +345,8 @@ class ResourceMonitor:
             network = psutil.net_io_counters()
             
             # SAGE process resources
-            sage_memory = self.sage_process.memory_info()
-            sage_cpu = self.sage_process.cpu_percent()
+            sage_memory = self.sage_process.memory_info() if self.sage_process else None
+            sage_cpu = self.sage_process.cpu_percent() if self.sage_process else 0.0
             
             # Module resources
             module_resources = {}
@@ -342,10 +370,10 @@ class ResourceMonitor:
                 memory_percent=memory.percent,
                 memory_mb=memory.used / 1024 / 1024,
                 disk_usage_percent=disk.percent,
-                network_bytes_sent=network.bytes_sent - self.network_baseline.bytes_sent,
-                network_bytes_recv=network.bytes_recv - self.network_baseline.bytes_recv,
+                network_bytes_sent=network.bytes_sent - (self.network_baseline.bytes_sent if self.network_baseline else 0),
+                network_bytes_recv=network.bytes_recv - (self.network_baseline.bytes_recv if self.network_baseline else 0),
                 process_count=len(psutil.pids()),
-                sage_memory_mb=sage_memory.rss / 1024 / 1024,
+                sage_memory_mb=sage_memory.rss / 1024 / 1024 if sage_memory else 0.0,
                 sage_cpu_percent=sage_cpu,
                 module_resources=module_resources
             )
@@ -526,6 +554,18 @@ class ResourceMonitor:
     def get_system_info(self) -> Dict[str, Any]:
         """Get static system information"""
         try:
+            if not PSUTIL_AVAILABLE:
+                return {
+                    "cpu_count": 0,
+                    "cpu_count_logical": 0,
+                    "memory_total_gb": 0.0,
+                    "disk_total_gb": 0.0,
+                    "platform": 'unknown',
+                    "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                    "sage_pid": 0,
+                    "psutil_available": False
+                }
+            
             return {
                 "cpu_count": psutil.cpu_count(),
                 "cpu_count_logical": psutil.cpu_count(logical=True),
@@ -533,11 +573,12 @@ class ResourceMonitor:
                 "disk_total_gb": psutil.disk_usage('/').total / 1024 / 1024 / 1024,
                 "platform": psutil.WINDOWS if hasattr(psutil, 'WINDOWS') else 'linux',
                 "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
-                "sage_pid": self.sage_process.pid
+                "sage_pid": self.sage_process.pid if self.sage_process else 0,
+                "psutil_available": True
             }
         except Exception as e:
             self.logger.error(f"Failed to get system info: {e}")
-            return {}
+            return {"error": str(e), "psutil_available": PSUTIL_AVAILABLE}
             
     async def optimize_performance(self) -> None:
         """Attempt to optimize SAGE performance"""

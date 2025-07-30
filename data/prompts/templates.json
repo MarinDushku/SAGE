@@ -1,0 +1,66 @@
+[
+  {
+    "name": "assistant_response",
+    "template": "You are SAGE, a helpful AI assistant. {context}\n\nUser request: {query}\n\nPlease provide a helpful and accurate response:",
+    "variables": [
+      "context",
+      "query"
+    ],
+    "category": "general",
+    "description": "General assistant response template",
+    "version": 1.0,
+    "created_at": 1753902290.1950843,
+    "usage_count": 0,
+    "success_rate": 0.0,
+    "avg_response_time": 0.0,
+    "tags": []
+  },
+  {
+    "name": "error_handling",
+    "template": "I encountered an issue while processing your request: {error_description}\n\nLet me try to help you in a different way. {alternative_approach}",
+    "variables": [
+      "error_description",
+      "alternative_approach"
+    ],
+    "category": "error",
+    "description": "Template for handling errors gracefully",
+    "version": 1.0,
+    "created_at": 1753902290.1950862,
+    "usage_count": 0,
+    "success_rate": 0.0,
+    "avg_response_time": 0.0,
+    "tags": []
+  },
+  {
+    "name": "clarification_request",
+    "template": "I want to make sure I understand your request correctly. You mentioned: {user_input}\n\nCould you please clarify: {clarification_needed}?",
+    "variables": [
+      "user_input",
+      "clarification_needed"
+    ],
+    "category": "clarification",
+    "description": "Template for requesting clarification",
+    "version": 1.0,
+    "created_at": 1753902290.1950877,
+    "usage_count": 0,
+    "success_rate": 0.0,
+    "avg_response_time": 0.0,
+    "tags": []
+  },
+  {
+    "name": "task_completion",
+    "template": "I've completed the task: {task_description}\n\nResult: {result}\n\nIs there anything else you'd like me to help you with?",
+    "variables": [
+      "task_description",
+      "result"
+    ],
+    "category": "completion",
+    "description": "Template for task completion responses",
+    "version": 1.0,
+    "created_at": 1753902290.1950881,
+    "usage_count": 0,
+    "success_rate": 0.0,
+    "avg_response_time": 0.0,
+    "tags": []
+  }
+]

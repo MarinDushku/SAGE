@@ -1,0 +1,57 @@
+{
+  "entries": [
+    {
+      "key": "7207f5a68c37e8aa",
+      "prompt": "test_prompt",
+      "response": "This is a test response",
+      "metadata": {
+        "model": "phi3:mini"
+      },
+      "created_at": 1753902138.6450398,
+      "accessed_at": 1753902138.6450608,
+      "access_count": 2,
+      "ttl": 3600,
+      "embedding": null
+    },
+    {
+      "key": "3a0f93a45291cf91",
+      "prompt": "Hello, how are you?",
+      "response": "Hello! I'm SAGE, your AI assistant. How can I help you today?",
+      "metadata": {
+        "model": "phi3:mini",
+        "provider": "ollama",
+        "temperature": 0.7,
+        "max_tokens": 1000
+      },
+      "created_at": 1753902290.2023113,
+      "accessed_at": 1753902290.2023113,
+      "access_count": 1,
+      "ttl": 3600,
+      "embedding": null
+    }
+  ],
+  "stats": {
+    "hits": 1,
+    "misses": 2,
+    "sets": 3,
+    "evictions": 0,
+    "total_entries": 3,
+    "total_size_bytes": 148,
+    "cleanup_runs": 4,
+    "similarity_matches": 0
+  },
+  "config": {
+    "max_size": 1000,
+    "ttl_seconds": 3600,
+    "similarity_threshold": 0.85,
+    "enable_similarity_matching": true,
+    "persistent": true,
+    "cache_file": "llm_cache.json",
+    "cleanup_interval": 300,
+    "enable_compression": false,
+    "max_response_length": 10000,
+    "enable_analytics": true
+  },
+  "embeddings": {},
+  "timestamp": 1753904715.9354434
+}

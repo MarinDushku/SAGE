@@ -114,14 +114,32 @@ class VoiceSynthesis:
                     # Configure volume
                     engine.setProperty('volume', self.volume)
                     
-                    # Configure voice if specified
-                    if self.voice_id:
-                        voices = engine.getProperty('voices')
+                    # Configure voice - try to find a working voice
+                    voices = engine.getProperty('voices')
+                    voice_set = False
+                    
+                    if self.voice_id and voices:
+                        # Try to find the specified voice
                         for voice in voices:
-                            if self.voice_id in voice.id or self.voice_id in voice.name:
-                                engine.setProperty('voice', voice.id)
-                                break
-                                
+                            if voice and (self.voice_id in str(voice.id) or self.voice_id in str(voice.name)):
+                                try:
+                                    engine.setProperty('voice', voice.id)
+                                    voice_set = True
+                                    break
+                                except:
+                                    continue
+                    
+                    # If no voice was set, use the first available voice
+                    if not voice_set and voices:
+                        for voice in voices:
+                            if voice and voice.id:
+                                try:
+                                    engine.setProperty('voice', voice.id)
+                                    voice_set = True
+                                    break
+                                except:
+                                    continue
+                                    
                     return engine
                     
                 loop = asyncio.get_event_loop()
