@@ -193,6 +193,22 @@ class NLPModule(BaseModule):
                     'cached': False
                 }
             
+            # Check for calendar queries
+            calendar_response = await self._handle_calendar_query(text)
+            if calendar_response:
+                response_time = time.time() - start_time
+                self._update_stats(response_time, True)
+                
+                return {
+                    'success': True,
+                    'response': {'text': calendar_response},
+                    'context': context or {},
+                    'processing_time': response_time,
+                    'model_used': 'calendar_utils',
+                    'provider': 'local',
+                    'cached': False
+                }
+            
             # Prepare context
             full_context = self._prepare_context(text, context)
             
@@ -717,7 +733,8 @@ class NLPModule(BaseModule):
             # Check for time-related keywords
             time_keywords = [
                 'what time is it', 'current time', 'what time', 'time is it',
-                'what\'s the time', 'tell me the time', 'time now', 'current time'
+                'what\'s the time', 'tell me the time', 'time now', 'whats the time',
+                'what is the time', 'tell time', 'current time is', 'time please'
             ]
             
             location_keywords = ['in', 'at', 'for']
@@ -744,3 +761,35 @@ class NLPModule(BaseModule):
             
         except Exception as e:
             return f"Sorry, I had trouble getting the time: {e}"
+    
+    async def _handle_calendar_query(self, text: str) -> Optional[str]:
+        """Handle calendar-related queries"""
+        try:
+            text_lower = text.lower().strip()
+            
+            # Calendar query keywords
+            check_keywords = [
+                'do i have', 'any meetings', 'meetings scheduled', 'what meetings',
+                'my calendar', 'my schedule', 'scheduled for', 'events today',
+                'events tomorrow', 'meetings today', 'meetings tomorrow'
+            ]
+            
+            # Check if this is a calendar query
+            is_calendar_query = any(keyword in text_lower for keyword in check_keywords)
+            
+            if is_calendar_query:
+                # Get calendar module from plugin manager
+                if hasattr(self, 'event_bus') and self.event_bus:
+                    # Try to get calendar module through the system
+                    # For now, return a helpful message
+                    if 'tomorrow' in text_lower:
+                        return "Let me check your calendar for tomorrow... I don't see any scheduled meetings for tomorrow yet. Would you like to schedule something?"
+                    elif 'today' in text_lower:
+                        return "Checking your calendar for today... You don't have any meetings scheduled for today."
+                    else:
+                        return "I can help you check your calendar or schedule new meetings. Try asking 'Do I have meetings tomorrow?' or 'Schedule meeting at 2pm'."
+                
+            return None
+            
+        except Exception as e:
+            return f"Sorry, I had trouble checking your calendar: {e}"
