@@ -105,4 +105,7 @@ debug/
 
 # Backup files
 *.bak
-*.backupbin/
+*.backup
+
+# Large binary files
+bin/
