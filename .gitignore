@@ -105,4 +105,4 @@ debug/
 
 # Backup files
 *.bak
-*.backup
+*.backupbin/
