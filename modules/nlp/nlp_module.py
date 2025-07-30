@@ -717,7 +717,7 @@ class NLPModule(BaseModule):
             # Check for time-related keywords
             time_keywords = [
                 'what time is it', 'current time', 'what time', 'time is it',
-                'what\\'s the time', 'tell me the time', 'time now', 'current time'
+                'what\'s the time', 'tell me the time', 'time now', 'current time'
             ]
             
             location_keywords = ['in', 'at', 'for']

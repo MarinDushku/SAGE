@@ -679,7 +679,7 @@ class CalendarModule(BaseModule):
             text_lower = text_lower.replace(word, '')
         
         # Remove time-related words
-        for word in ['tomorrow', 'today', 'next week', 'at', 'pm', 'am', 'o\\'clock']:
+        for word in ['tomorrow', 'today', 'next week', 'at', 'pm', 'am', 'o\'clock']:
             text_lower = text_lower.replace(word, '')
         
         # Clean up and capitalize
