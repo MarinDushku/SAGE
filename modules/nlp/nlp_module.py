@@ -209,6 +209,22 @@ class NLPModule(BaseModule):
                     'cached': False
                 }
             
+            # Check for scheduling requests
+            schedule_response = await self._handle_schedule_request(text)
+            if schedule_response:
+                response_time = time.time() - start_time
+                self._update_stats(response_time, True)
+                
+                return {
+                    'success': True,
+                    'response': {'text': schedule_response},
+                    'context': context or {},
+                    'processing_time': response_time,
+                    'model_used': 'calendar_scheduling',
+                    'provider': 'local',
+                    'cached': False
+                }
+            
             # Prepare context
             full_context = self._prepare_context(text, context)
             
@@ -778,18 +794,120 @@ class NLPModule(BaseModule):
             is_calendar_query = any(keyword in text_lower for keyword in check_keywords)
             
             if is_calendar_query:
-                # Get calendar module from plugin manager
-                if hasattr(self, 'event_bus') and self.event_bus:
-                    # Try to get calendar module through the system
-                    # For now, return a helpful message
-                    if 'tomorrow' in text_lower:
-                        return "Let me check your calendar for tomorrow... I don't see any scheduled meetings for tomorrow yet. Would you like to schedule something?"
-                    elif 'today' in text_lower:
-                        return "Checking your calendar for today... You don't have any meetings scheduled for today."
-                    else:
-                        return "I can help you check your calendar or schedule new meetings. Try asking 'Do I have meetings tomorrow?' or 'Schedule meeting at 2pm'."
+                # Get calendar module to actually check the database
+                calendar_module = None
+                if hasattr(self, 'event_bus') and self.event_bus and hasattr(self.event_bus, 'subscribers'):
+                    # Try to find calendar module through event bus subscribers
+                    for event_type, subscribers in self.event_bus.subscribers.items():
+                        for subscriber in subscribers:
+                            if hasattr(subscriber, 'name') and subscriber.name == 'calendar':
+                                calendar_module = subscriber
+                                break
+                        if calendar_module:
+                            break
+                
+                # If we found the calendar module, check the actual database
+                if calendar_module:
+                    try:
+                        # Get events for the requested timeframe
+                        if 'tomorrow' in text_lower:
+                            # Calculate tomorrow's date range
+                            import datetime
+                            tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
+                            start_time = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+                            end_time = tomorrow.replace(hour=23, minute=59, second=59, microsecond=999999).timestamp()
+                            
+                            events = await calendar_module._get_events_in_range(start_time, end_time)
+                            
+                            if events:
+                                event_list = []
+                                for event in events:
+                                    event_time = time.strftime('%I:%M %p', time.localtime(event['start_time']))
+                                    event_list.append(f"• {event['title']} at {event_time}")
+                                
+                                return f"You have {len(events)} meeting{'s' if len(events) != 1 else ''} tomorrow:\n" + "\n".join(event_list)
+                            else:
+                                return "You don't have any meetings scheduled for tomorrow."
+                                
+                        elif 'today' in text_lower:
+                            # Calculate today's date range
+                            import datetime
+                            today = datetime.datetime.now()
+                            start_time = today.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+                            end_time = today.replace(hour=23, minute=59, second=59, microsecond=999999).timestamp()
+                            
+                            events = await calendar_module._get_events_in_range(start_time, end_time)
+                            
+                            if events:
+                                event_list = []
+                                for event in events:
+                                    event_time = time.strftime('%I:%M %p', time.localtime(event['start_time']))
+                                    event_list.append(f"• {event['title']} at {event_time}")
+                                
+                                return f"You have {len(events)} meeting{'s' if len(events) != 1 else ''} today:\n" + "\n".join(event_list)
+                            else:
+                                return "You don't have any meetings scheduled for today."
+                        else:
+                            return "I can check your calendar for today or tomorrow. Try asking 'Do I have meetings tomorrow?' or 'What's on my schedule today?'"
+                            
+                    except Exception as e:
+                        return f"I had trouble checking your calendar: {e}"
+                
+                # Fallback if calendar module not accessible
+                if 'tomorrow' in text_lower:
+                    return "Let me check your calendar for tomorrow... I don't see any scheduled meetings for tomorrow yet. Would you like to schedule something?"
+                elif 'today' in text_lower:
+                    return "Checking your calendar for today... You don't have any meetings scheduled for today."
+                else:
+                    return "I can help you check your calendar or schedule new meetings. Try asking 'Do I have meetings tomorrow?' or 'Schedule meeting at 2pm'."
                 
             return None
             
         except Exception as e:
             return f"Sorry, I had trouble checking your calendar: {e}"
+    
+    async def _handle_schedule_request(self, text: str) -> Optional[str]:
+        """Handle scheduling requests and actually create calendar events"""
+        try:
+            text_lower = text.lower().strip()
+            
+            # Scheduling keywords  
+            schedule_keywords = [
+                'schedule', 'add meeting', 'book appointment', 'create event',
+                'set up meeting', 'plan meeting', 'add event', 'book meeting',
+                'schedule meeting', 'add appointment', 'create meeting'
+            ]
+            
+            # Check if this is a scheduling request
+            is_schedule_request = any(keyword in text_lower for keyword in schedule_keywords)
+            
+            if is_schedule_request:
+                # Get the calendar module from plugin manager
+                calendar_module = None
+                if hasattr(self, 'event_bus') and self.event_bus and hasattr(self.event_bus, 'subscribers'):
+                    # Try to find calendar module through event bus subscribers
+                    for event_type, subscribers in self.event_bus.subscribers.items():
+                        for subscriber in subscribers:
+                            if hasattr(subscriber, 'name') and subscriber.name == 'calendar':
+                                calendar_module = subscriber
+                                break
+                        if calendar_module:
+                            break
+                
+                # If we found the calendar module, use it to create the event
+                if calendar_module and hasattr(calendar_module, 'handle_natural_language'):
+                    result = await calendar_module.handle_natural_language(text)
+                    
+                    if result.get('success') and result.get('event_created'):
+                        event = result.get('event', {})
+                        return f"✅ Successfully scheduled: {event.get('title')} for {event.get('start_time')}. You'll get a reminder {event.get('reminder', '15 minutes before')}."
+                    else:
+                        return f"I understood you want to schedule something, but I need more details. Try: 'Schedule team meeting tomorrow at 2pm'"
+                
+                # Fallback if calendar module not accessible
+                return "I can help you schedule events! Try saying: 'Schedule meeting tomorrow at 2pm' or 'Add appointment Friday at 10am'"
+                
+            return None
+            
+        except Exception as e:
+            return f"Sorry, I had trouble with scheduling: {e}"

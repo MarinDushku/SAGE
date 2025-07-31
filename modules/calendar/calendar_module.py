@@ -225,6 +225,14 @@ class CalendarModule(BaseModule):
         self.parser = NaturalLanguageParser()
         self.active_reminders = {}
         
+        # Initialize stats
+        self.stats = {
+            'total_events': 0,
+            'total_reminders': 0,
+            'events_created': 0,
+            'reminders_delivered': 0
+        }
+        
     async def initialize(self) -> bool:
         """Initialize the calendar module"""
         try:
@@ -624,17 +632,22 @@ class CalendarModule(BaseModule):
             # Check for schedule/meeting keywords
             if any(word in text_lower for word in ['schedule', 'meeting', 'appointment', 'remind', 'event']):
                 # Try to parse the request
-                parsed = self.parser.parse_datetime(text)
+                parsed_dt = self.parser.parse_datetime(text)
                 
-                if parsed['datetime']:
+                if parsed_dt:
                     # Extract title from text
                     title = self._extract_title_from_text(text)
                     
+                    # Generate event ID
+                    import hashlib
+                    event_id = hashlib.md5(f"{title}_{parsed_dt.timestamp()}_{time.time()}".encode()).hexdigest()[:12]
+                    
                     # Create event
                     event = CalendarEvent(
+                        event_id=event_id,
                         title=title or "New Event",
-                        start_time=parsed['datetime'],
-                        end_time=parsed['datetime'] + 3600,  # 1 hour default
+                        start_time=parsed_dt.timestamp(),
+                        end_time=parsed_dt.timestamp() + 3600,  # 1 hour default
                         description=f"Event created from: {text}",
                         location="",
                         reminder_minutes=15
@@ -688,6 +701,79 @@ class CalendarModule(BaseModule):
             title = "Meeting"
         
         return title.title()
+
+    async def add_event(self, event: CalendarEvent) -> bool:
+        """Add an event to the calendar database"""
+        try:
+            with self.db_lock:
+                conn = sqlite3.connect(str(self.db_path))
+                cursor = conn.cursor()
+                
+                # Insert the event
+                cursor.execute("""
+                    INSERT INTO events 
+                    (event_id, title, description, location, start_time, end_time, 
+                     all_day, reminder_minutes, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    event.event_id, event.title, event.description, event.location,
+                    event.start_time, event.end_time, event.all_day, event.reminder_minutes,
+                    time.time(), time.time()
+                ))
+                
+                conn.commit()
+                conn.close()
+                
+                # Create reminder if needed
+                if event.reminder_minutes > 0:
+                    await self._schedule_reminder(event)
+                
+                # Update statistics
+                self.stats['total_events'] += 1
+                self.log(f"Successfully added event: {event.title} at {time.strftime('%Y-%m-%d %H:%M', time.localtime(event.start_time))}")
+                
+                return True
+                
+        except Exception as e:
+            self.log(f"Failed to add event: {e}", "error")
+            return False
+
+    async def _schedule_reminder(self, event: CalendarEvent):
+        """Schedule a reminder for an event"""
+        try:
+            reminder_time = event.start_time - (event.reminder_minutes * 60)
+            
+            if reminder_time > time.time():  # Only create future reminders
+                reminder_id = f"{event.event_id}_reminder"
+                
+                reminder = Reminder(
+                    reminder_id=reminder_id,
+                    event_id=event.event_id,
+                    reminder_time=reminder_time,
+                    message=f"Reminder: {event.title} in {event.reminder_minutes} minutes"
+                )
+                
+                # Save to database
+                with self.db_lock:
+                    conn = sqlite3.connect(str(self.db_path))
+                    cursor = conn.cursor()
+                    
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO reminders 
+                        (reminder_id, event_id, reminder_time, message, delivered, delivery_method)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        reminder.reminder_id, reminder.event_id, reminder.reminder_time,
+                        reminder.message, reminder.delivered, reminder.delivery_method
+                    ))
+                    
+                    conn.commit()
+                    conn.close()
+                    
+                self.log(f"Scheduled reminder for event: {event.title}")
+                
+        except Exception as e:
+            self.log(f"Failed to schedule reminder: {e}", "error")
 
     async def _reminder_loop(self):
         """Background loop to check for due reminders"""
