@@ -68,6 +68,7 @@ class EnhancedVoiceRecognition:
         
         # Enhanced async handling
         self.audio_queue = asyncio.Queue(maxsize=10)
+        self.text_queue = asyncio.Queue(maxsize=20)  # Queue for recognized text
         self.event_loop = None
         self.executor = ThreadPoolExecutor(max_workers=2)
         
@@ -408,6 +409,23 @@ class EnhancedVoiceRecognition:
                 
                 self.log(f"✅ Recognition successful: '{text}' (confidence: {confidence:.2f}, time: {processing_time:.2f}s)")
                 
+                # Add to text queue for main app to retrieve
+                try:
+                    result = {
+                        'text': text,
+                        'confidence': confidence,
+                        'timestamp': time.time(),
+                        'processing_time': processing_time
+                    }
+                    self.text_queue.put_nowait(result)
+                except asyncio.QueueFull:
+                    self.log("Text queue full, dropping oldest result", "warning")
+                    try:
+                        self.text_queue.get_nowait()  # Remove oldest
+                        self.text_queue.put_nowait(result)  # Add new
+                    except asyncio.QueueEmpty:
+                        pass
+                
                 # Call text recognized callback
                 if self.on_text_recognized:
                     try:
@@ -588,6 +606,7 @@ class EnhancedVoiceRecognition:
         """Get detailed debug information"""
         return {
             'audio_queue_size': self.audio_queue.qsize() if hasattr(self.audio_queue, 'qsize') else 0,
+            'text_queue_size': self.text_queue.qsize() if hasattr(self.text_queue, 'qsize') else 0,
             'background_thread_alive': self.background_thread.is_alive() if self.background_thread else False,
             'stop_event_set': self.stop_event.is_set(),
             'event_loop_running': self.event_loop and not self.event_loop.is_closed(),
@@ -595,3 +614,13 @@ class EnhancedVoiceRecognition:
             'recent_audio_levels': self.audio_levels[-10:] if self.audio_levels else [],
             'silence_counter': self.silence_counter
         }
+    
+    async def get_recognized_text(self) -> Optional[Dict[str, Any]]:
+        """Get the next recognized text from the queue (non-blocking)"""
+        try:
+            return self.text_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return None
+        except Exception as e:
+            self.log(f"Error getting recognized text: {e}", "error")
+            return None

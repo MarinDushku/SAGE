@@ -34,8 +34,8 @@ class VoiceModule(BaseModule):
             config = self.config or {}
             
             # Initialize recognition engine
-            from .recognition import VoiceRecognition
-            self.recognition_engine = VoiceRecognition(
+            from .enhanced_recognition import EnhancedVoiceRecognition
+            self.recognition_engine = EnhancedVoiceRecognition(
                 config.get('recognition', {}),
                 self.cache,
                 self.logger
@@ -448,6 +448,19 @@ class VoiceModule(BaseModule):
         except Exception as e:
             self.log(f"Error getting voice profiles: {e}", "error")
             return {}
+    
+    async def get_voice_input(self) -> Optional[Dict[str, Any]]:
+        """Get voice input from recognition engine"""
+        try:
+            if not self.recognition_engine:
+                return None
+            
+            # Check if there's any recognized text available
+            return await self.recognition_engine.get_recognized_text()
+            
+        except Exception as e:
+            self.log(f"Error getting voice input: {e}", "error")
+            return None
 
 
 __all__ = ['VoiceModule']
