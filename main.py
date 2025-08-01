@@ -353,7 +353,7 @@ class SAGEApplication:
                     # Check for voice input with timeout
                     voice_input = await asyncio.wait_for(
                         voice_module.get_voice_input(), 
-                        timeout=1.0
+                        timeout=0.1
                     )
                     
                     if voice_input and voice_input.get('text'):
