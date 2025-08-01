@@ -239,7 +239,9 @@ class VoiceSynthesis:
                 if 'voice_id' in voice_config:
                     voices = self.tts_engine.getProperty('voices')
                     for voice in voices:
-                        if voice_config['voice_id'] in voice.id or voice_config['voice_id'] in voice.name:
+                        voice_id = voice.id or ""
+                        voice_name = voice.name or ""
+                        if voice_config['voice_id'] in voice_id or voice_config['voice_id'] in voice_name:
                             self.tts_engine.setProperty('voice', voice.id)
                             break
                             
