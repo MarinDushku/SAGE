@@ -288,8 +288,16 @@ class VoiceSynthesis:
                 # Apply emotion/style modifications to text
                 modified_text = self._apply_emotion_to_text(text, config.get('emotion', 'neutral'))
                 
+                import time
+                self.logger.info(f"🗣️ Starting TTS: '{modified_text}'")
+                start_time = time.time()
+                
                 self.tts_engine.say(modified_text)
+                self.logger.info("🔄 TTS runAndWait() starting...")
                 self.tts_engine.runAndWait()
+                
+                end_time = time.time()
+                self.logger.info(f"✅ TTS completed in {end_time - start_time:.2f} seconds")
                 return True
                 
             loop = asyncio.get_event_loop()
