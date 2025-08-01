@@ -381,6 +381,10 @@ class SAGEApplication:
                             print(f"✅ Wake word detected! Processing: '{command_text}'")
                             main_log.info(f"Processing command: '{command_text}'")
                             
+                            # Completely stop listening BEFORE processing to prevent feedback
+                            print("🔇 Stopping listening during processing...")
+                            await voice_module.stop_listening()
+                            
                             # Process command through NLP
                             if nlp_module:
                                 try:
@@ -388,7 +392,7 @@ class SAGEApplication:
                                     intent_result = await nlp_module.analyze_intent(command_text)
                                     print(f"🧠 Intent: {intent_result.get('intent', 'unknown')} (confidence: {intent_result.get('confidence', 0):.2f})")
                                     
-                                    # Route to appropriate module
+                                    # Route to appropriate module (this includes TTS)
                                     await self._route_voice_command(command_text, intent_result)
                                     
                                 except Exception as e:
@@ -400,13 +404,9 @@ class SAGEApplication:
                                 print("🔄 Processing without NLP module...")
                                 await self._route_voice_command(command_text, {'intent': 'unknown'})
                             
-                            # Completely stop listening during speech to prevent feedback
-                            print("🔇 Stopping listening during speech...")
-                            await voice_module.stop_listening()
-                            
                             # Wait for voice synthesis to complete
                             print("⏸️ Waiting for speech to complete...")
-                            await asyncio.sleep(3.0)  # Extra time for TTS to finish
+                            await asyncio.sleep(2.0)  # Give time for TTS to finish
                             
                             # Restart listening after speech
                             print("🎤 Restarting listening for next command...")
