@@ -385,6 +385,10 @@ class SAGEApplication:
                             print("🔇 Stopping listening during processing...")
                             await voice_module.stop_listening()
                             
+                            # Wait for audio resources to fully release
+                            print("⏸️ Waiting for audio resources to release...")
+                            await asyncio.sleep(0.5)  # Give audio system time to release resources
+                            
                             # Process command through NLP
                             if nlp_module:
                                 try:
