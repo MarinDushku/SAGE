@@ -350,10 +350,10 @@ class SAGEApplication:
             
             while self.running and not self.shutdown_event.is_set():
                 try:
-                    # Check for voice input with timeout
+                    # Check for voice input with timeout (longer to allow transcription time)
                     voice_input = await asyncio.wait_for(
                         voice_module.get_voice_input(), 
-                        timeout=0.1
+                        timeout=0.5
                     )
                     
                     if voice_input and voice_input.get('text'):
@@ -408,7 +408,8 @@ class SAGEApplication:
                             print(f"⚠️  No wake word detected in: '{text}'")
                     
                 except asyncio.TimeoutError:
-                    # Normal timeout - continue listening
+                    # Normal timeout - give brief moment for transcription to complete
+                    await asyncio.sleep(0.01)
                     continue
                 except Exception as e:
                     main_log.error(f"Error processing voice input: {e}")
