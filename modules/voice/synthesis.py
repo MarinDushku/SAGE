@@ -230,20 +230,28 @@ class VoiceSynthesis:
             
         try:
             def apply_config():
-                if 'rate' in voice_config:
-                    self.tts_engine.setProperty('rate', voice_config['rate'])
-                    
-                if 'volume' in voice_config:
-                    self.tts_engine.setProperty('volume', voice_config['volume'])
-                    
-                if 'voice_id' in voice_config:
-                    voices = self.tts_engine.getProperty('voices')
-                    for voice in voices:
-                        voice_id = voice.id or ""
-                        voice_name = voice.name or ""
-                        if voice_config['voice_id'] in voice_id or voice_config['voice_id'] in voice_name:
-                            self.tts_engine.setProperty('voice', voice.id)
-                            break
+                try:
+                    if 'rate' in voice_config:
+                        self.tts_engine.setProperty('rate', voice_config['rate'])
+                        
+                    if 'volume' in voice_config:
+                        self.tts_engine.setProperty('volume', voice_config['volume'])
+                        
+                    if 'voice_id' in voice_config and voice_config['voice_id']:
+                        voices = self.tts_engine.getProperty('voices')
+                        if voices:
+                            for voice in voices:
+                                try:
+                                    voice_id = getattr(voice, 'id', None) or ""
+                                    voice_name = getattr(voice, 'name', None) or ""
+                                    if voice_config['voice_id'] and (voice_config['voice_id'] in voice_id or voice_config['voice_id'] in voice_name):
+                                        self.tts_engine.setProperty('voice', voice.id)
+                                        break
+                                except Exception:
+                                    continue
+                except Exception as e:
+                    # Log specific error for debugging
+                    self.logger.warning(f"Voice config application error: {e}")
                             
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, apply_config)
