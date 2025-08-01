@@ -387,7 +387,7 @@ class SAGEApplication:
                             
                             # Wait for audio resources to fully release
                             print("⏸️ Waiting for audio resources to release...")
-                            await asyncio.sleep(1.5)  # Longer delay to ensure complete audio release
+                            await asyncio.sleep(10.0)  # Give plenty of time for audio system to release all resources
                             
                             # Process command through NLP
                             if nlp_module:
