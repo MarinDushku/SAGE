@@ -323,23 +323,23 @@ class EnhancedVoiceRecognition:
                         
                         self.log(f"Audio captured, level: {self.stats['last_audio_level']:.1f}")
                         
-                        # Put audio in queue for async processing
+                        # Process audio directly in thread with proper async coordination
                         try:
-                            if self.event_loop and not self.event_loop.is_closed():
-                                # Use call_soon_threadsafe for more reliable cross-thread communication
-                                def queue_audio():
-                                    if not self.audio_queue.full():
-                                        try:
-                                            self.audio_queue.put_nowait(audio)
-                                            self.log("Audio queued for processing", "debug")
-                                        except asyncio.QueueFull:
-                                            self.log("Audio queue full, dropping audio", "warning")
-                                
-                                self.event_loop.call_soon_threadsafe(queue_audio)
-                            else:
-                                self.log("Event loop not available for audio processing", "warning")
+                            self.log("Processing audio directly...")
+                            
+                            # Process the audio synchronously in this thread
+                            future = asyncio.run_coroutine_threadsafe(
+                                self._process_single_audio_direct(audio), 
+                                self.event_loop
+                            )
+                            
+                            # Wait for processing to complete
+                            future.result(timeout=10.0)  # 10 second timeout for transcription
+                            
+                        except asyncio.TimeoutError:
+                            self.log("Audio processing timed out", "warning")
                         except Exception as e:
-                            self.log(f"Failed to queue audio for processing: {e}", "error")
+                            self.log(f"Failed to process audio: {e}", "error")
                         
                 except sr.WaitTimeoutError:
                     # Timeout is normal - continue listening
@@ -390,8 +390,8 @@ class EnhancedVoiceRecognition:
         finally:
             self.log("Audio processing task stopped")
     
-    async def _process_single_audio(self, audio):
-        """Process a single audio sample"""
+    async def _process_single_audio_direct(self, audio):
+        """Process a single audio sample directly (called from thread)"""
         try:
             start_time = time.time()
             self.stats['recognitions_attempted'] += 1
@@ -425,11 +425,13 @@ class EnhancedVoiceRecognition:
                         'processing_time': processing_time
                     }
                     self.text_queue.put_nowait(result)
+                    self.log("✅ Text queued for main application")
                 except asyncio.QueueFull:
                     self.log("Text queue full, dropping oldest result", "warning")
                     try:
                         self.text_queue.get_nowait()  # Remove oldest
                         self.text_queue.put_nowait(result)  # Add new
+                        self.log("✅ Text queued after dropping old result")
                     except asyncio.QueueEmpty:
                         pass
                 
@@ -452,6 +454,10 @@ class EnhancedVoiceRecognition:
                     await self._safe_callback(self.on_error, str(e))
                 except Exception as callback_error:
                     self.log(f"Error in error callback: {callback_error}", "error")
+
+    async def _process_single_audio(self, audio):
+        """Process a single audio sample (legacy method for queue-based processing)"""
+        await self._process_single_audio_direct(audio)
     
     async def _recognize_audio(self, audio) -> tuple[Optional[str], float]:
         """Recognize text from audio using configured engine"""
