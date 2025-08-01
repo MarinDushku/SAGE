@@ -11,6 +11,8 @@ from pathlib import Path
 
 from modules import BaseModule, EventType, Event
 from modules.time_utils import TimeUtils
+from .intent_analyzer import IntentAnalyzer
+from .semantic_matcher import SemanticMatcher
 
 # Try to import HTTP client for Ollama API
 try:
@@ -69,6 +71,10 @@ class NLPModule(BaseModule):
         # Time utilities
         self.time_utils = TimeUtils()
         
+        # Enhanced NLP components
+        self.intent_analyzer = None
+        self.semantic_matcher = None
+        
         # Statistics
         self.stats = {
             'total_requests': 0,
@@ -113,6 +119,9 @@ class NLPModule(BaseModule):
             
             # Initialize LLM cache
             await self._initialize_llm_cache()
+            
+            # Initialize enhanced NLP components
+            await self._initialize_enhanced_nlp()
             
             # Load user preferences
             await self._load_user_preferences()
@@ -297,57 +306,17 @@ class NLPModule(BaseModule):
                 'provider': self.provider
             }
             
-    async def analyze_intent(self, text: str) -> Dict[str, Any]:
-        """Analyze the intent of user input"""
+    async def analyze_intent(self, text: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+        """Analyze the intent of user input with enhanced semantic understanding"""
         try:
-            # Simple intent analysis - can be enhanced with more sophisticated NLP
-            text_lower = text.lower().strip()
-            
-            # Define basic intent patterns
-            intent_patterns = {
-                'greeting': ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'],
-                'goodbye': ['bye', 'goodbye', 'see you', 'farewell', 'exit', 'quit'],
-                'question': ['what', 'how', 'why', 'when', 'where', 'who', 'which'],
-                'request': ['please', 'can you', 'could you', 'would you', 'help me'],
-                'command': ['do', 'run', 'execute', 'start', 'stop', 'open', 'close'],
-                'information': ['tell me', 'show me', 'explain', 'describe', 'about'],
-                'weather': ['weather', 'temperature', 'forecast', 'rain', 'sunny', 'cloudy'],
-                'time': ['time', 'date', 'today', 'tomorrow', 'yesterday', 'calendar'],
-                'web_search': ['search', 'google', 'find', 'look up', 'browse'],
-                'voice_command': ['listen', 'speak', 'say', 'voice', 'hear']
-            }
-            
-            # Calculate confidence scores
-            intent_scores = {}
-            for intent, patterns in intent_patterns.items():
-                score = 0
-                for pattern in patterns:
-                    if pattern in text_lower:
-                        score += 1
-                        
-                if score > 0:
-                    intent_scores[intent] = score / len(patterns)
-                    
-            # Find best intent
-            if intent_scores:
-                best_intent = max(intent_scores, key=intent_scores.get)
-                confidence = intent_scores[best_intent]
-                
+            if self.intent_analyzer:
+                # Use enhanced intent analyzer
+                result = self.intent_analyzer.analyze_intent(text, context)
                 self.stats['intents_processed'] += 1
-                
-                return {
-                    'intent': best_intent,
-                    'confidence': confidence,
-                    'all_scores': intent_scores,
-                    'threshold_met': confidence >= self.confidence_threshold
-                }
+                return result
             else:
-                return {
-                    'intent': 'unknown',
-                    'confidence': 0.0,
-                    'all_scores': {},
-                    'threshold_met': False
-                }
+                # Fallback to basic intent analysis
+                return await self._analyze_intent_basic(text)
                 
         except Exception as e:
             self.log(f"Error analyzing intent: {e}", "error")
@@ -686,15 +655,19 @@ class NLPModule(BaseModule):
             
             self.log(f"Processing voice command: '{command}' (confidence: {confidence:.2f})")
             
-            # Analyze intent first
-            intent_result = await self.analyze_intent(command)
+            # Analyze intent first with enhanced analyzer
+            intent_result = await self.analyze_intent(command, {
+                'source': 'voice',
+                'confidence': confidence
+            })
             
             # Process with LLM
             response = await self.process_text(command, {
                 'intent': intent_result.get('intent', 'unknown'),
                 'intent_confidence': intent_result.get('confidence', 0.0),
                 'voice_confidence': confidence,
-                'source': 'voice'
+                'source': 'voice',
+                'context_summary': self.intent_analyzer.get_context_summary() if self.intent_analyzer else {}
             })
             
             return response
@@ -911,3 +884,63 @@ class NLPModule(BaseModule):
             
         except Exception as e:
             return f"Sorry, I had trouble with scheduling: {e}"
+    
+    async def _initialize_enhanced_nlp(self):
+        """Initialize enhanced NLP components"""
+        try:
+            # Initialize intent analyzer
+            self.intent_analyzer = IntentAnalyzer(logger=self.logger)
+            self.log("Enhanced intent analyzer initialized")
+            
+            # Initialize semantic matcher
+            self.semantic_matcher = SemanticMatcher(logger=self.logger)
+            self.log("Semantic matcher initialized")
+            
+        except Exception as e:
+            self.log(f"Failed to initialize enhanced NLP components: {e}", "warning")
+            self.intent_analyzer = None
+            self.semantic_matcher = None
+    
+    async def _analyze_intent_basic(self, text: str) -> Dict[str, Any]:
+        """Basic fallback intent analysis"""
+        text_lower = text.lower().strip()
+        
+        # Define basic intent patterns
+        intent_patterns = {
+            'greeting': ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'],
+            'goodbye': ['bye', 'goodbye', 'see you', 'farewell', 'exit', 'quit'],
+            'question': ['what', 'how', 'why', 'when', 'where', 'who', 'which'],
+            'schedule_meeting': ['schedule', 'book', 'add meeting', 'create meeting'],
+            'check_calendar': ['do i have', 'what meetings', 'my calendar', 'my schedule'],
+            'time': ['time', 'date', 'today', 'tomorrow', 'yesterday'],
+        }
+        
+        # Calculate confidence scores
+        intent_scores = {}
+        for intent, patterns in intent_patterns.items():
+            score = 0
+            for pattern in patterns:
+                if pattern in text_lower:
+                    score += 1
+                    
+            if score > 0:
+                intent_scores[intent] = score / len(patterns)
+                
+        # Find best intent
+        if intent_scores:
+            best_intent = max(intent_scores, key=intent_scores.get)
+            confidence = intent_scores[best_intent]
+            
+            return {
+                'intent': best_intent,
+                'confidence': confidence,
+                'all_scores': intent_scores,
+                'threshold_met': confidence >= self.confidence_threshold
+            }
+        else:
+            return {
+                'intent': 'unknown',
+                'confidence': 0.0,
+                'all_scores': {},
+                'threshold_met': False
+            }

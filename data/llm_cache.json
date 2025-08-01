@@ -1,12 +1,45 @@
 {
-  "entries": [],
+  "entries": [
+    {
+      "key": "bbd86ee314345ed1",
+      "prompt": "Hello, how are you today?",
+      "response": "Hello! I'm SAGE, your AI assistant. How can I help you today?",
+      "metadata": {
+        "model": "phi3:mini",
+        "provider": "ollama",
+        "temperature": 0.7,
+        "max_tokens": 1000
+      },
+      "created_at": 1754030380.7846022,
+      "accessed_at": 1754030380.7846022,
+      "access_count": 1,
+      "ttl": 3600,
+      "embedding": null
+    },
+    {
+      "key": "e2ac0a38ea8d32db",
+      "prompt": "Test message",
+      "response": "I understand you're trying to communicate with me. My language processing is currently limited.",
+      "metadata": {
+        "model": "phi3:mini",
+        "provider": "ollama",
+        "temperature": 0.7,
+        "max_tokens": 1000
+      },
+      "created_at": 1754030380.7864945,
+      "accessed_at": 1754030380.7864945,
+      "access_count": 1,
+      "ttl": 3600,
+      "embedding": null
+    }
+  ],
   "stats": {
     "hits": 1,
-    "misses": 2,
-    "sets": 3,
+    "misses": 4,
+    "sets": 5,
     "evictions": 2,
-    "total_entries": 1,
-    "total_size_bytes": 148,
+    "total_entries": 3,
+    "total_size_bytes": 341,
     "cleanup_runs": 26,
     "similarity_matches": 0
   },
@@ -23,5 +56,5 @@
     "enable_analytics": true
   },
   "embeddings": {},
-  "timestamp": 1753912161.0994585
+  "timestamp": 1754030380.786798
 }

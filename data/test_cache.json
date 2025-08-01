@@ -7,8 +7,8 @@
       "metadata": {
         "model": "test"
       },
-      "created_at": 1753902181.125663,
-      "accessed_at": 1753902181.1256633,
+      "created_at": 1754030382.9280272,
+      "accessed_at": 1754030382.9280272,
       "access_count": 1,
       "ttl": 3600,
       "embedding": null
@@ -17,10 +17,10 @@
   "stats": {
     "hits": 0,
     "misses": 0,
-    "sets": 2,
+    "sets": 3,
     "evictions": 0,
-    "total_entries": 2,
-    "total_size_bytes": 82,
+    "total_entries": 3,
+    "total_size_bytes": 123,
     "cleanup_runs": 0,
     "similarity_matches": 0
   },
@@ -37,5 +37,5 @@
     "enable_analytics": true
   },
   "embeddings": {},
-  "timestamp": 1753902181.1256847
+  "timestamp": 1754030382.9280586
 }
