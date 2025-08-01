@@ -461,7 +461,7 @@ class SAGEApplication:
                     await voice_module.speak_text("Calendar module is not available.")
             
             # Time queries
-            elif intent in ['time', 'clock', 'current_time']:
+            elif intent in ['time', 'clock', 'current_time', 'time_query']:
                 try:
                     from datetime import datetime
                     current_time = datetime.now().strftime("%I:%M %p")
