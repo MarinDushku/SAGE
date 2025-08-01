@@ -326,10 +326,13 @@ class EnhancedVoiceRecognition:
                         # Put audio in queue for async processing
                         try:
                             if self.event_loop and not self.event_loop.is_closed():
-                                asyncio.run_coroutine_threadsafe(
+                                future = asyncio.run_coroutine_threadsafe(
                                     self.audio_queue.put(audio), 
                                     self.event_loop
                                 )
+                                # Wait briefly to ensure it's queued
+                                future.result(timeout=0.1)
+                                self.log("Audio queued for processing", "debug")
                             else:
                                 self.log("Event loop not available for audio processing", "warning")
                         except Exception as e:
@@ -370,6 +373,7 @@ class EnhancedVoiceRecognition:
                 try:
                     # Wait for audio with timeout
                     audio = await asyncio.wait_for(self.audio_queue.get(), timeout=1.0)
+                    self.log("Audio retrieved from queue for processing")
                     await self._process_single_audio(audio)
                     
                 except asyncio.TimeoutError:
