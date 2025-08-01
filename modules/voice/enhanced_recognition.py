@@ -71,7 +71,12 @@ class EnhancedVoiceRecognition:
         self.text_queue = asyncio.Queue(maxsize=20)  # Queue for recognized text
         self.event_loop = None
         self.executor = ThreadPoolExecutor(max_workers=2)
-        self.processing_lock = asyncio.Lock()  # Prevent overlapping audio processing
+        self.processing_lock = None  # Will be initialized with event loop
+        
+        # Simple thread-safe queue for cross-thread communication
+        import queue
+        self.simple_audio_queue = queue.Queue(maxsize=5)
+        self.simple_text_queue = queue.Queue(maxsize=10)
         
         # Threading
         self.background_thread = None
@@ -327,30 +332,53 @@ class EnhancedVoiceRecognition:
                         
                         self.log(f"Audio captured, level: {self.stats['last_audio_level']:.1f}")
                         
-                        # Process audio and pause listening during transcription
+                        # Process audio directly in thread - much simpler and more reliable
                         try:
                             self.log("Processing audio - pausing listening...")
                             
                             # Temporarily stop listening during processing
                             self.recognition_active = False
                             
-                            # Process the audio synchronously to complete before next listen
-                            future = asyncio.run_coroutine_threadsafe(
-                                self._process_single_audio_direct(audio), 
-                                self.event_loop
-                            )
+                            # Process audio directly in this thread (synchronous)
+                            start_time = time.time()
+                            self.stats['recognitions_attempted'] += 1
                             
-                            # Wait for processing to complete (with longer timeout for Whisper)
-                            future.result(timeout=5.0)
+                            self.log("Starting Whisper transcription...")
+                            
+                            # Transcribe with Whisper directly
+                            text, confidence = self._transcribe_audio_sync(audio)
+                            
+                            processing_time = time.time() - start_time
+                            
+                            if text and text.strip():
+                                self.stats['recognitions_successful'] += 1
+                                self._update_average_response_time(processing_time)
+                                
+                                self.log(f"✅ Recognition successful: '{text}' (confidence: {confidence:.2f}, time: {processing_time:.2f}s)")
+                                
+                                # Add to simple thread-safe queue
+                                result = {
+                                    'text': text,
+                                    'confidence': confidence,
+                                    'timestamp': time.time(),
+                                    'processing_time': processing_time
+                                }
+                                
+                                try:
+                                    self.simple_text_queue.put_nowait(result)
+                                    self.log("✅ Text queued for main application")
+                                except queue.Full:
+                                    self.log("Text queue full, dropping result", "warning")
+                                
+                            else:
+                                self.stats['recognitions_failed'] += 1
+                                self.log(f"❌ Recognition failed - no text extracted (time: {processing_time:.2f}s)")
                             
                             self.log("Audio processing complete - resuming listening...")
                             
                             # Resume listening after processing
                             self.recognition_active = True
                             
-                        except asyncio.TimeoutError:
-                            self.log("Audio processing timed out - resuming listening", "warning")
-                            self.recognition_active = True
                         except Exception as e:
                             self.log(f"Failed to process audio: {e}", "error")
                             self.recognition_active = True
@@ -651,12 +679,53 @@ class EnhancedVoiceRecognition:
     async def get_recognized_text(self) -> Optional[Dict[str, Any]]:
         """Get the next recognized text from the queue (non-blocking)"""
         try:
+            # Try simple queue first (more reliable)
+            try:
+                return self.simple_text_queue.get_nowait()
+            except queue.Empty:
+                pass
+            
+            # Fallback to async queue
             return self.text_queue.get_nowait()
         except asyncio.QueueEmpty:
             return None
         except Exception as e:
             self.log(f"Error getting recognized text: {e}", "error")
             return None
+    
+    def _transcribe_audio_sync(self, audio) -> tuple[Optional[str], float]:
+        """Synchronous audio transcription for thread-safe processing"""
+        try:
+            if self.engine_type == 'whisper' and self.whisper_model:
+                # Convert audio to format Whisper expects
+                audio_data = audio.get_raw_data(convert_rate=16000, convert_width=2)
+                
+                # Convert to numpy array
+                import numpy as np
+                audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                
+                # Transcribe synchronously
+                result = self.whisper_model.transcribe(audio_np, language=self.language)
+                text = result['text'].strip()
+                
+                return text if text else None, 0.8
+                
+            elif self.engine_type == 'google':
+                # Use Google Speech Recognition
+                try:
+                    text = self.recognizer.recognize_google(audio, language=self.language)
+                    return text.strip(), 0.9
+                except sr.UnknownValueError:
+                    return None, 0.0
+                except sr.RequestError as e:
+                    self.log(f"Google recognition service error: {e}", "error")
+                    return None, 0.0
+            else:
+                return None, 0.0
+                
+        except Exception as e:
+            self.log(f"Synchronous transcription failed: {e}", "error")
+            return None, 0.0
     
     def resume_listening_after_response(self):
         """Resume listening after SAGE has finished responding"""
