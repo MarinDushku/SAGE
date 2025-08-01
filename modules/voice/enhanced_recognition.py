@@ -71,6 +71,7 @@ class EnhancedVoiceRecognition:
         self.text_queue = asyncio.Queue(maxsize=20)  # Queue for recognized text
         self.event_loop = None
         self.executor = ThreadPoolExecutor(max_workers=2)
+        self.processing_lock = asyncio.Lock()  # Prevent overlapping audio processing
         
         # Threading
         self.background_thread = None
@@ -118,6 +119,9 @@ class EnhancedVoiceRecognition:
             
             # Store event loop for proper async handling
             self.event_loop = asyncio.get_event_loop()
+            
+            # Initialize async lock for processing coordination
+            self.processing_lock = asyncio.Lock()
             
             # Check dependencies
             if not self._check_dependencies():
@@ -323,23 +327,20 @@ class EnhancedVoiceRecognition:
                         
                         self.log(f"Audio captured, level: {self.stats['last_audio_level']:.1f}")
                         
-                        # Process audio directly in thread with proper async coordination
+                        # Process audio asynchronously - don't block listening thread
                         try:
-                            self.log("Processing audio directly...")
+                            self.log("Queuing audio for async processing...")
                             
-                            # Process the audio synchronously in this thread
-                            future = asyncio.run_coroutine_threadsafe(
+                            # Process the audio asynchronously without blocking
+                            asyncio.run_coroutine_threadsafe(
                                 self._process_single_audio_direct(audio), 
                                 self.event_loop
                             )
                             
-                            # Wait for processing to complete
-                            future.result(timeout=5.0)  # 5 second timeout for transcription
+                            self.log("Audio queued - continuing to listen...")
                             
-                        except asyncio.TimeoutError:
-                            self.log("Audio processing timed out", "warning")
                         except Exception as e:
-                            self.log(f"Failed to process audio: {e}", "error")
+                            self.log(f"Failed to queue audio processing: {e}", "error")
                         
                 except sr.WaitTimeoutError:
                     # Timeout is normal - continue listening
@@ -392,68 +393,74 @@ class EnhancedVoiceRecognition:
     
     async def _process_single_audio_direct(self, audio):
         """Process a single audio sample directly (called from thread)"""
-        try:
-            start_time = time.time()
-            self.stats['recognitions_attempted'] += 1
+        # Use lock to prevent overlapping processing
+        if self.processing_lock.locked():
+            self.log("Audio processing already in progress, skipping...", "debug")
+            return
             
-            self.log("Processing audio sample...")
-            
-            # Call speech detected callback
-            if self.on_speech_detected:
-                try:
-                    await self._safe_callback(self.on_speech_detected, audio)
-                except Exception as e:
-                    self.log(f"Error in speech detected callback: {e}", "warning")
-            
-            # Perform recognition
-            text, confidence = await self._recognize_audio(audio)
-            
-            processing_time = time.time() - start_time
-            
-            if text and text.strip():
-                self.stats['recognitions_successful'] += 1
-                self._update_average_response_time(processing_time)
+        async with self.processing_lock:
+            try:
+                start_time = time.time()
+                self.stats['recognitions_attempted'] += 1
                 
-                self.log(f"✅ Recognition successful: '{text}' (confidence: {confidence:.2f}, time: {processing_time:.2f}s)")
+                self.log("Processing audio sample...")
                 
-                # Add to text queue for main app to retrieve
-                try:
-                    result = {
-                        'text': text,
-                        'confidence': confidence,
-                        'timestamp': time.time(),
-                        'processing_time': processing_time
-                    }
-                    self.text_queue.put_nowait(result)
-                    self.log("✅ Text queued for main application")
-                except asyncio.QueueFull:
-                    self.log("Text queue full, dropping oldest result", "warning")
+                # Call speech detected callback
+                if self.on_speech_detected:
                     try:
-                        self.text_queue.get_nowait()  # Remove oldest
-                        self.text_queue.put_nowait(result)  # Add new
-                        self.log("✅ Text queued after dropping old result")
-                    except asyncio.QueueEmpty:
-                        pass
-                
-                # Call text recognized callback
-                if self.on_text_recognized:
-                    try:
-                        await self._safe_callback(self.on_text_recognized, text, confidence)
+                        await self._safe_callback(self.on_speech_detected, audio)
                     except Exception as e:
-                        self.log(f"Error in text recognized callback: {e}", "error")
-            else:
-                self.stats['recognitions_failed'] += 1
-                self.log(f"❌ Recognition failed - no text extracted (time: {processing_time:.2f}s)")
+                        self.log(f"Error in speech detected callback: {e}", "warning")
                 
-        except Exception as e:
-            self.log(f"Error processing audio: {e}", "error")
-            self.stats['recognitions_failed'] += 1
-            
-            if self.on_error:
-                try:
-                    await self._safe_callback(self.on_error, str(e))
-                except Exception as callback_error:
-                    self.log(f"Error in error callback: {callback_error}", "error")
+                # Perform recognition
+                text, confidence = await self._recognize_audio(audio)
+                
+                processing_time = time.time() - start_time
+                
+                if text and text.strip():
+                    self.stats['recognitions_successful'] += 1
+                    self._update_average_response_time(processing_time)
+                    
+                    self.log(f"✅ Recognition successful: '{text}' (confidence: {confidence:.2f}, time: {processing_time:.2f}s)")
+                    
+                    # Add to text queue for main app to retrieve
+                    try:
+                        result = {
+                            'text': text,
+                            'confidence': confidence,
+                            'timestamp': time.time(),
+                            'processing_time': processing_time
+                        }
+                        self.text_queue.put_nowait(result)
+                        self.log("✅ Text queued for main application")
+                    except asyncio.QueueFull:
+                        self.log("Text queue full, dropping oldest result", "warning")
+                        try:
+                            self.text_queue.get_nowait()  # Remove oldest
+                            self.text_queue.put_nowait(result)  # Add new
+                            self.log("✅ Text queued after dropping old result")
+                        except asyncio.QueueEmpty:
+                            pass
+                    
+                    # Call text recognized callback
+                    if self.on_text_recognized:
+                        try:
+                            await self._safe_callback(self.on_text_recognized, text, confidence)
+                        except Exception as e:
+                            self.log(f"Error in text recognized callback: {e}", "error")
+                else:
+                    self.stats['recognitions_failed'] += 1
+                    self.log(f"❌ Recognition failed - no text extracted (time: {processing_time:.2f}s)")
+                    
+            except Exception as e:
+                self.log(f"Error processing audio: {e}", "error")
+                self.stats['recognitions_failed'] += 1
+                
+                if self.on_error:
+                    try:
+                        await self._safe_callback(self.on_error, str(e))
+                    except Exception as callback_error:
+                        self.log(f"Error in error callback: {callback_error}", "error")
 
     async def _process_single_audio(self, audio):
         """Process a single audio sample (legacy method for queue-based processing)"""
