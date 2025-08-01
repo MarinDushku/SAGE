@@ -334,7 +334,7 @@ class EnhancedVoiceRecognition:
                             )
                             
                             # Wait for processing to complete
-                            future.result(timeout=10.0)  # 10 second timeout for transcription
+                            future.result(timeout=5.0)  # 5 second timeout for transcription
                             
                         except asyncio.TimeoutError:
                             self.log("Audio processing timed out", "warning")
