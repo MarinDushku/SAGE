@@ -292,46 +292,19 @@ class VoiceSynthesis:
                 self.logger.info(f"🗣️ Starting TTS: '{modified_text}'")
                 start_time = time.time()
                 
-                # Create a completely fresh TTS engine instance to avoid resource conflicts
-                import pyttsx3
-                fresh_engine = pyttsx3.init()
-                
-                # Configure the fresh engine with same settings
-                fresh_engine.setProperty('rate', config.get('rate', self.rate))
-                fresh_engine.setProperty('volume', config.get('volume', self.volume))
-                
-                # Set voice if specified
-                voices = fresh_engine.getProperty('voices')
-                if voices and self.voice_id:
-                    for voice in voices:
-                        try:
-                            voice_id = getattr(voice, 'id', None) or ""
-                            voice_name = getattr(voice, 'name', None) or ""
-                            if self.voice_id and (self.voice_id in voice_id or self.voice_id in voice_name):
-                                fresh_engine.setProperty('voice', voice.id)
-                                break
-                        except Exception:
-                            continue
-                
+                # Use the shared TTS engine (same as welcome message that works)
                 self.logger.info("🔄 TTS runAndWait() starting...")
-                fresh_engine.say(modified_text)
                 
                 # Check if engine is working before runAndWait
-                busy_before = getattr(fresh_engine, '_inLoop', False)
+                busy_before = getattr(self.tts_engine, '_inLoop', False)
                 self.logger.info(f"🔍 Engine busy before runAndWait: {busy_before}")
                 
-                fresh_engine.runAndWait()
+                self.tts_engine.say(modified_text)
+                self.tts_engine.runAndWait()
                 
                 # Check if engine completed normally
-                busy_after = getattr(fresh_engine, '_inLoop', False) 
+                busy_after = getattr(self.tts_engine, '_inLoop', False) 
                 self.logger.info(f"🔍 Engine busy after runAndWait: {busy_after}")
-                
-                # Properly cleanup the fresh engine
-                try:
-                    fresh_engine.stop()
-                    del fresh_engine
-                except Exception:
-                    pass
                 
                 end_time = time.time()
                 duration = end_time - start_time
@@ -340,53 +313,7 @@ class VoiceSynthesis:
                 # Sanity check - if TTS completed too quickly, something went wrong
                 if duration < 1.0 and len(modified_text) > 10:
                     self.logger.warning(f"⚠️ TTS completed suspiciously fast ({duration:.2f}s) for text length {len(modified_text)}")
-                    
-                    # Try alternative approach - force blocking playback
-                    self.logger.info("🔄 Retrying with forced blocking approach...")
-                    retry_start = time.time()
-                    
-                    # Create another fresh engine
-                    retry_engine = pyttsx3.init()
-                    retry_engine.setProperty('rate', config.get('rate', self.rate))
-                    retry_engine.setProperty('volume', config.get('volume', self.volume))
-                    
-                    # Try connecting to started event to ensure completion
-                    def on_start(name):
-                        self.logger.info(f"🗣️ TTS started speaking: {name}")
-                    
-                    def on_word(name, location, length):
-                        self.logger.info(f"🗣️ TTS speaking word at {location}: {name[location:location+length]}")
-                    
-                    def on_end(name, completed):
-                        self.logger.info(f"🗣️ TTS finished: {name}, completed: {completed}")
-                    
-                    # Connect event handlers
-                    try:
-                        retry_engine.connect('started-utterance', on_start)
-                        retry_engine.connect('started-word', on_word) 
-                        retry_engine.connect('finished-utterance', on_end)
-                    except Exception as e:
-                        self.logger.info(f"Could not connect TTS events: {e}")
-                    
-                    retry_engine.say(modified_text)
-                    retry_engine.runAndWait()
-                    
-                    # Manual delay to ensure audio completion
-                    import time
-                    time.sleep(1.0)
-                    
-                    try:
-                        retry_engine.stop()
-                        del retry_engine
-                    except Exception:
-                        pass
-                    
-                    retry_duration = time.time() - retry_start
-                    self.logger.info(f"✅ Retry TTS completed in {retry_duration:.2f} seconds")
-                    
-                    if retry_duration < 1.0:
-                        self.logger.error("❌ Retry TTS also failed - audio system may be unavailable")
-                        return False
+                    return False
                 
                 return True
                 
