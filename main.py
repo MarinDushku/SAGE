@@ -399,13 +399,20 @@ class SAGEApplication:
                                 # Basic fallback without NLP
                                 print("🔄 Processing without NLP module...")
                                 await self._route_voice_command(command_text, {'intent': 'unknown'})
+                            
+                            # Resume listening after processing response
+                            print("🎤 Ready for next command...")
+                            voice_module.resume_listening()
                                 
                         elif wake_word_detected:
                             print("👋 Wake word detected but no command given")
                             await voice_module.speak_text("Yes? What can I help you with?")
+                            print("🎤 Ready for next command...")
+                            voice_module.resume_listening()
                         else:
-                            # No wake word - ignore
+                            # No wake word - ignore and resume listening immediately
                             print(f"⚠️  No wake word detected in: '{text}'")
+                            voice_module.resume_listening()
                     
                 except asyncio.TimeoutError:
                     # Normal timeout - give brief moment for transcription to complete

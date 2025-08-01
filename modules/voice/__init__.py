@@ -461,6 +461,15 @@ class VoiceModule(BaseModule):
         except Exception as e:
             self.log(f"Error getting voice input: {e}", "error")
             return None
+    
+    def resume_listening(self):
+        """Resume listening after processing response"""
+        try:
+            if self.recognition_engine and hasattr(self.recognition_engine, 'resume_listening_after_response'):
+                self.recognition_engine.resume_listening_after_response()
+                self.log("Listening resumed after response")
+        except Exception as e:
+            self.log(f"Error resuming listening: {e}", "error")
 
 
 __all__ = ['VoiceModule']

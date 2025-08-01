@@ -327,20 +327,33 @@ class EnhancedVoiceRecognition:
                         
                         self.log(f"Audio captured, level: {self.stats['last_audio_level']:.1f}")
                         
-                        # Process audio asynchronously - don't block listening thread
+                        # Process audio and pause listening during transcription
                         try:
-                            self.log("Queuing audio for async processing...")
+                            self.log("Processing audio - pausing listening...")
                             
-                            # Process the audio asynchronously without blocking
-                            asyncio.run_coroutine_threadsafe(
+                            # Temporarily stop listening during processing
+                            self.recognition_active = False
+                            
+                            # Process the audio synchronously to complete before next listen
+                            future = asyncio.run_coroutine_threadsafe(
                                 self._process_single_audio_direct(audio), 
                                 self.event_loop
                             )
                             
-                            self.log("Audio queued - continuing to listen...")
+                            # Wait for processing to complete (with timeout)
+                            future.result(timeout=3.0)
                             
+                            self.log("Audio processing complete - resuming listening...")
+                            
+                            # Resume listening after processing
+                            self.recognition_active = True
+                            
+                        except asyncio.TimeoutError:
+                            self.log("Audio processing timed out - resuming listening", "warning")
+                            self.recognition_active = True
                         except Exception as e:
-                            self.log(f"Failed to queue audio processing: {e}", "error")
+                            self.log(f"Failed to process audio: {e}", "error")
+                            self.recognition_active = True
                         
                 except sr.WaitTimeoutError:
                     # Timeout is normal - continue listening
@@ -644,3 +657,9 @@ class EnhancedVoiceRecognition:
         except Exception as e:
             self.log(f"Error getting recognized text: {e}", "error")
             return None
+    
+    def resume_listening_after_response(self):
+        """Resume listening after SAGE has finished responding"""
+        if not self.recognition_active and self.is_listening:
+            self.log("Resuming listening after response...")
+            self.recognition_active = True
