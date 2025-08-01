@@ -254,21 +254,54 @@ class SAGEApplication:
             # Speak welcome message
             await self._speak_welcome_message()
             
-            # Main event loop
-            while self.running and not self.shutdown_event.is_set():
+            # Start voice listening if available
+            voice_task = None
+            voice_module = self.plugin_manager.get_module('voice')
+            if voice_module and hasattr(voice_module, 'start_listening'):
                 try:
-                    # Wait for shutdown signal or timeout
-                    await asyncio.wait_for(
-                        self.shutdown_event.wait(), 
-                        timeout=10.0
-                    )
-                    break
-                except asyncio.TimeoutError:
-                    # Timeout is normal - continue running
-                    continue
+                    print("🎤 Starting voice recognition...")
+                    voice_listening_started = await voice_module.start_listening()
+                    if voice_listening_started:
+                        print("✅ Voice recognition active - say 'Hey Sage' or 'Sage' to interact")
+                        # Create voice processing task
+                        voice_task = asyncio.create_task(self._process_voice_commands())
+                    else:
+                        print("⚠️  Voice recognition not available (microphone/audio issues)")
                 except Exception as e:
-                    main_log.error(f"Error in main loop: {e}")
-                    await asyncio.sleep(1)
+                    print(f"⚠️  Could not start voice recognition: {e}")
+                    main_log.warning(f"Voice recognition startup failed: {e}")
+
+            # Main event loop
+            try:
+                while self.running and not self.shutdown_event.is_set():
+                    try:
+                        # Wait for shutdown signal or timeout
+                        await asyncio.wait_for(
+                            self.shutdown_event.wait(), 
+                            timeout=10.0
+                        )
+                        break
+                    except asyncio.TimeoutError:
+                        # Timeout is normal - continue running
+                        continue
+                    except Exception as e:
+                        main_log.error(f"Error in main loop: {e}")
+                        await asyncio.sleep(1)
+            finally:
+                # Stop voice recognition
+                if voice_task:
+                    voice_task.cancel()
+                    try:
+                        await voice_task
+                    except asyncio.CancelledError:
+                        pass
+                        
+                if voice_module and hasattr(voice_module, 'stop_listening'):
+                    try:
+                        await voice_module.stop_listening()
+                        print("🔇 Voice recognition stopped")
+                    except Exception as e:
+                        main_log.warning(f"Error stopping voice recognition: {e}")
                     
         except KeyboardInterrupt:
             print("\n🛑 Keyboard interrupt received")
@@ -301,6 +334,197 @@ class SAGEApplication:
         except Exception as e:
             print(f"🔇 Could not speak welcome message: {e}")
             print("   Note: This is normal in WSL or systems without audio hardware")
+    
+    async def _process_voice_commands(self) -> None:
+        """Process incoming voice commands from voice recognition"""
+        try:
+            voice_module = self.plugin_manager.get_module('voice')
+            nlp_module = self.plugin_manager.get_module('nlp')
+            main_log = self.logger.get_logger("voice")
+            
+            if not voice_module:
+                main_log.error("Voice module not available for command processing")
+                return
+                
+            main_log.info("Voice command processing started")
+            
+            while self.running and not self.shutdown_event.is_set():
+                try:
+                    # Check for voice input with timeout
+                    voice_input = await asyncio.wait_for(
+                        voice_module.get_voice_input(), 
+                        timeout=1.0
+                    )
+                    
+                    if voice_input and voice_input.get('text'):
+                        text = voice_input['text'].strip()
+                        confidence = voice_input.get('confidence', 0.0)
+                        
+                        main_log.info(f"Voice input received: '{text}' (confidence: {confidence:.2f})")
+                        print(f"🗣️  Heard: '{text}' (confidence: {confidence:.2f})")
+                        
+                        # Check for wake words
+                        wake_words = ['sage', 'hey sage', 'computer', 'hey computer']
+                        text_lower = text.lower()
+                        
+                        wake_word_detected = False
+                        command_text = text_lower
+                        
+                        for wake_word in wake_words:
+                            if wake_word in text_lower:
+                                wake_word_detected = True
+                                # Remove wake word from command
+                                command_text = text_lower.replace(wake_word, '').strip()
+                                break
+                        
+                        if wake_word_detected and command_text:
+                            print(f"✅ Wake word detected! Processing: '{command_text}'")
+                            main_log.info(f"Processing command: '{command_text}'")
+                            
+                            # Process command through NLP
+                            if nlp_module:
+                                try:
+                                    # Analyze intent
+                                    intent_result = await nlp_module.analyze_intent(command_text)
+                                    print(f"🧠 Intent: {intent_result.get('intent', 'unknown')} (confidence: {intent_result.get('confidence', 0):.2f})")
+                                    
+                                    # Route to appropriate module
+                                    await self._route_voice_command(command_text, intent_result)
+                                    
+                                except Exception as e:
+                                    main_log.error(f"NLP processing failed: {e}")
+                                    print(f"❌ Could not process command: {e}")
+                                    await voice_module.speak_text("Sorry, I couldn't understand that command.")
+                            else:
+                                # Basic fallback without NLP
+                                print("🔄 Processing without NLP module...")
+                                await self._route_voice_command(command_text, {'intent': 'unknown'})
+                                
+                        elif wake_word_detected:
+                            print("👋 Wake word detected but no command given")
+                            await voice_module.speak_text("Yes? What can I help you with?")
+                        else:
+                            # No wake word - ignore
+                            print(f"⚠️  No wake word detected in: '{text}'")
+                    
+                except asyncio.TimeoutError:
+                    # Normal timeout - continue listening
+                    continue
+                except Exception as e:
+                    main_log.error(f"Error processing voice input: {e}")
+                    await asyncio.sleep(1)
+                    
+        except Exception as e:
+            main_log.error(f"Voice command processing failed: {e}")
+            print(f"❌ Voice command processing error: {e}")
+    
+    async def _route_voice_command(self, command_text: str, intent_result: dict) -> None:
+        """Route voice commands to appropriate modules"""
+        try:
+            main_log = self.logger.get_logger("voice")
+            voice_module = self.plugin_manager.get_module('voice')
+            
+            intent = intent_result.get('intent', 'unknown')
+            confidence = intent_result.get('confidence', 0.0)
+            
+            main_log.info(f"Routing command '{command_text}' with intent '{intent}' (confidence: {confidence:.2f})")
+            
+            # Calendar commands
+            if intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment']:
+                calendar_module = self.plugin_manager.get_module('calendar')
+                if calendar_module:
+                    try:
+                        print("📅 Processing calendar command...")
+                        result = await calendar_module.process_voice_command(command_text)
+                        
+                        if result.get('success'):
+                            response = result.get('response', 'Calendar command processed.')
+                            print(f"✅ Calendar: {response}")
+                            await voice_module.speak_text(response)
+                        else:
+                            error_msg = result.get('error', 'Calendar command failed.')
+                            print(f"❌ Calendar error: {error_msg}")
+                            await voice_module.speak_text(f"Sorry, {error_msg}")
+                            
+                    except Exception as e:
+                        main_log.error(f"Calendar processing error: {e}")
+                        await voice_module.speak_text("Sorry, I had trouble with your calendar request.")
+                else:
+                    await voice_module.speak_text("Calendar module is not available.")
+            
+            # Time queries
+            elif intent in ['time', 'clock', 'current_time']:
+                try:
+                    from datetime import datetime
+                    current_time = datetime.now().strftime("%I:%M %p")
+                    response = f"It's currently {current_time}"
+                    print(f"🕐 {response}")
+                    await voice_module.speak_text(response)
+                except Exception as e:
+                    main_log.error(f"Time query error: {e}")
+                    await voice_module.speak_text("Sorry, I couldn't get the current time.")
+            
+            # General conversation/questions
+            elif intent in ['question', 'conversation', 'general', 'unknown']:
+                nlp_module = self.plugin_manager.get_module('nlp')
+                if nlp_module:
+                    try:
+                        print("🤖 Processing general query...")
+                        result = await nlp_module.process_text(command_text)
+                        
+                        if result.get('success'):
+                            response = result['response']['text']
+                            print(f"💬 Response: {response[:100]}...")
+                            await voice_module.speak_text(response)
+                        else:
+                            error_msg = result.get('error', 'Could not process request.')
+                            print(f"❌ NLP error: {error_msg}")
+                            await voice_module.speak_text("Sorry, I couldn't process that request.")
+                            
+                    except Exception as e:
+                        main_log.error(f"NLP processing error: {e}")
+                        await voice_module.speak_text("Sorry, I had trouble understanding your request.")
+                else:
+                    await voice_module.speak_text("I can hear you, but my language processing isn't available right now.")
+            
+            # System commands
+            elif intent in ['status', 'health', 'system']:
+                try:
+                    status = await self.get_status()
+                    modules = list(status.get('modules', {}).keys())
+                    module_count = len(modules)
+                    
+                    response = f"I'm running normally with {module_count} modules loaded: {', '.join(modules[:3])}"
+                    if len(modules) > 3:
+                        response += f" and {len(modules) - 3} others"
+                    
+                    print(f"🔧 System status: {response}")
+                    await voice_module.speak_text(response)
+                    
+                except Exception as e:
+                    main_log.error(f"Status query error: {e}")
+                    await voice_module.speak_text("I'm having trouble checking my system status.")
+            
+            # Unknown/unsupported commands
+            else:
+                main_log.warning(f"Unsupported intent: {intent}")
+                fallback_responses = [
+                    "I'm not sure how to help with that.",
+                    "Could you rephrase that request?",
+                    "I didn't understand that command. Try asking about the time, calendar, or general questions.",
+                ]
+                
+                import random
+                response = random.choice(fallback_responses)
+                print(f"❓ Unknown command: {response}")
+                await voice_module.speak_text(response)
+                
+        except Exception as e:
+            main_log.error(f"Command routing error: {e}")
+            print(f"❌ Error routing command: {e}")
+            
+            if voice_module:
+                await voice_module.speak_text("Sorry, I encountered an error processing your request.")
     
     def _print_status(self) -> None:
         """Print current SAGE status"""
