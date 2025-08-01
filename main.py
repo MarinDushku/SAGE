@@ -385,9 +385,22 @@ class SAGEApplication:
                             print("🔇 Stopping listening during processing...")
                             await voice_module.stop_listening()
                             
-                            # Wait for audio resources to fully release
+                            # Wait for audio resources to fully release  
                             print("⏸️ Waiting for audio resources to release...")
-                            await asyncio.sleep(10.0)  # Give plenty of time for audio system to release all resources
+                            await asyncio.sleep(1.0)
+                            
+                            # COMPLETELY shutdown voice recognition components
+                            print("🛑 Completely shutting down voice recognition...")
+                            try:
+                                if hasattr(voice_module, 'recognition_engine') and voice_module.recognition_engine:
+                                    await voice_module.recognition_engine.shutdown()
+                                if hasattr(voice_module, 'wake_word_detector') and voice_module.wake_word_detector:
+                                    await voice_module.wake_word_detector.shutdown()
+                                if hasattr(voice_module, 'audio_processor') and voice_module.audio_processor:
+                                    await voice_module.audio_processor.shutdown()
+                                print("✅ Voice recognition components fully shutdown")
+                            except Exception as e:
+                                print(f"⚠️ Error shutting down voice components: {e}")
                             
                             # Process command through NLP
                             if nlp_module:

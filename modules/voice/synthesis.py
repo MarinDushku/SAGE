@@ -317,9 +317,8 @@ class VoiceSynthesis:
                 
                 return True
                 
-            # Test: Run directly without async executor (same as welcome message)
-            self.logger.info("🔧 Running TTS directly without async executor...")
-            result = speak_text()  # Run synchronously like welcome message
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, speak_text)
             
             return result
             
