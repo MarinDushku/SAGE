@@ -340,8 +340,8 @@ class EnhancedVoiceRecognition:
                                 self.event_loop
                             )
                             
-                            # Wait for processing to complete (with timeout)
-                            future.result(timeout=3.0)
+                            # Wait for processing to complete (with longer timeout for Whisper)
+                            future.result(timeout=5.0)
                             
                             self.log("Audio processing complete - resuming listening...")
                             
