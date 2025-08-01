@@ -400,21 +400,28 @@ class SAGEApplication:
                                 print("🔄 Processing without NLP module...")
                                 await self._route_voice_command(command_text, {'intent': 'unknown'})
                             
-                            # Wait for voice synthesis to complete before resuming listening
-                            print("⏸️ Waiting for speech to complete...")
-                            await asyncio.sleep(2.0)  # Give time for TTS to finish
+                            # Completely stop listening during speech to prevent feedback
+                            print("🔇 Stopping listening during speech...")
+                            await voice_module.stop_listening()
                             
-                            # Resume listening after processing response
-                            print("🎤 Ready for next command...")
-                            voice_module.resume_listening()
+                            # Wait for voice synthesis to complete
+                            print("⏸️ Waiting for speech to complete...")
+                            await asyncio.sleep(3.0)  # Extra time for TTS to finish
+                            
+                            # Restart listening after speech
+                            print("🎤 Restarting listening for next command...")
+                            await voice_module.start_listening()
                                 
                         elif wake_word_detected:
                             print("👋 Wake word detected but no command given")
+                            print("🔇 Stopping listening during speech...")
+                            await voice_module.stop_listening()
+                            
                             await voice_module.speak_text("Yes? What can I help you with?")
                             print("⏸️ Waiting for speech to complete...")
-                            await asyncio.sleep(2.0)  # Give time for TTS to finish
-                            print("🎤 Ready for next command...")
-                            voice_module.resume_listening()
+                            await asyncio.sleep(3.0)  # Give time for TTS to finish
+                            print("🎤 Restarting listening for next command...")
+                            await voice_module.start_listening()
                         else:
                             # No wake word - ignore and resume listening immediately
                             print(f"⚠️  No wake word detected in: '{text}'")
