@@ -400,6 +400,10 @@ class SAGEApplication:
                                 print("🔄 Processing without NLP module...")
                                 await self._route_voice_command(command_text, {'intent': 'unknown'})
                             
+                            # Wait for voice synthesis to complete before resuming listening
+                            print("⏸️ Waiting for speech to complete...")
+                            await asyncio.sleep(2.0)  # Give time for TTS to finish
+                            
                             # Resume listening after processing response
                             print("🎤 Ready for next command...")
                             voice_module.resume_listening()
@@ -407,6 +411,8 @@ class SAGEApplication:
                         elif wake_word_detected:
                             print("👋 Wake word detected but no command given")
                             await voice_module.speak_text("Yes? What can I help you with?")
+                            print("⏸️ Waiting for speech to complete...")
+                            await asyncio.sleep(2.0)  # Give time for TTS to finish
                             print("🎤 Ready for next command...")
                             voice_module.resume_listening()
                         else:
