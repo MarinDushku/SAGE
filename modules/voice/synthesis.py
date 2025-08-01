@@ -292,12 +292,47 @@ class VoiceSynthesis:
                 self.logger.info(f"🗣️ Starting TTS: '{modified_text}'")
                 start_time = time.time()
                 
-                self.tts_engine.say(modified_text)
+                # Create a completely fresh TTS engine instance to avoid resource conflicts
+                import pyttsx3
+                fresh_engine = pyttsx3.init()
+                
+                # Configure the fresh engine with same settings
+                fresh_engine.setProperty('rate', config.get('rate', self.rate))
+                fresh_engine.setProperty('volume', config.get('volume', self.volume))
+                
+                # Set voice if specified
+                voices = fresh_engine.getProperty('voices')
+                if voices and self.voice_id:
+                    for voice in voices:
+                        try:
+                            voice_id = getattr(voice, 'id', None) or ""
+                            voice_name = getattr(voice, 'name', None) or ""
+                            if self.voice_id and (self.voice_id in voice_id or self.voice_id in voice_name):
+                                fresh_engine.setProperty('voice', voice.id)
+                                break
+                        except Exception:
+                            continue
+                
                 self.logger.info("🔄 TTS runAndWait() starting...")
-                self.tts_engine.runAndWait()
+                fresh_engine.say(modified_text)
+                fresh_engine.runAndWait()
+                
+                # Properly cleanup the fresh engine
+                try:
+                    fresh_engine.stop()
+                    del fresh_engine
+                except Exception:
+                    pass
                 
                 end_time = time.time()
-                self.logger.info(f"✅ TTS completed in {end_time - start_time:.2f} seconds")
+                duration = end_time - start_time
+                self.logger.info(f"✅ TTS completed in {duration:.2f} seconds")
+                
+                # Sanity check - if TTS completed too quickly, something went wrong
+                if duration < 1.0 and len(modified_text) > 10:
+                    self.logger.warning(f"⚠️ TTS completed suspiciously fast ({duration:.2f}s) for text length {len(modified_text)}")
+                    return False
+                
                 return True
                 
             loop = asyncio.get_event_loop()
