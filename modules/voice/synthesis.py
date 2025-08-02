@@ -173,10 +173,10 @@ class VoiceSynthesis:
             self.logger.warning("Empty text provided for synthesis")
             return False
         
-        # Test: Reinitialize TTS engine if this is likely a command response
+        # Test: Use parallel fresh TTS engine if this is likely a command response
         if hasattr(self, 'working_tts_engine') and self.working_tts_engine:
-            self.logger.info("🔄 Creating fresh TTS engine to avoid audio session contamination...")
-            await self._reinitialize_fresh_tts_engine()
+            self.logger.info("🔄 Using parallel fresh TTS engine to avoid audio session contamination...")
+            return await self._speak_with_fresh_engine(text, voice_config, profile, priority)
             
         start_time = time.time()
         
@@ -401,69 +401,74 @@ class VoiceSynthesis:
             self.logger.error(f"Error stopping speech: {e}")
             return False
             
-    async def _reinitialize_fresh_tts_engine(self):
-        """Completely reinitialize TTS engine to get fresh audio session"""
+    async def _speak_with_fresh_engine(self, text: str, voice_config: Optional[Dict[str, Any]] = None, 
+                                      profile: str = 'default', priority: str = 'normal') -> bool:
+        """Speak using a completely fresh TTS engine without touching the original"""
         try:
-            self.logger.info("🗑️ Destroying contaminated TTS engine...")
+            self.logger.info("🔧 Creating parallel fresh TTS engine...")
             
-            # Completely destroy old engine
-            if self.tts_engine:
-                try:
-                    self.tts_engine.stop()
-                    del self.tts_engine
-                    self.tts_engine = None
-                except Exception as e:
-                    self.logger.warning(f"Error destroying old TTS engine: {e}")
+            # Get effective config
+            effective_config = await self._get_effective_config(profile, voice_config or {})
             
-            # Force garbage collection
-            import gc
-            gc.collect()
-            
-            # Brief delay to let audio system reset
-            import asyncio
-            await asyncio.sleep(0.5)
-            
-            self.logger.info("🔧 Creating completely fresh TTS engine...")
-            
-            # Create brand new TTS engine in executor
-            def create_fresh_engine():
+            def speak_with_fresh():
                 import pyttsx3
+                import time
+                
+                # Create completely separate fresh engine
                 fresh_engine = pyttsx3.init()
                 
-                # Configure with original settings
-                fresh_engine.setProperty('rate', self.rate)
-                fresh_engine.setProperty('volume', self.volume)
-                
-                # Set voice if we have one configured
-                if self.voice_id:
-                    voices = fresh_engine.getProperty('voices')
-                    if voices:
-                        for voice in voices:
-                            try:
-                                voice_id = getattr(voice, 'id', None) or ""
-                                voice_name = getattr(voice, 'name', None) or ""
-                                if self.voice_id and (self.voice_id in voice_id or self.voice_id in voice_name):
-                                    fresh_engine.setProperty('voice', voice.id)
-                                    break
-                            except Exception:
-                                continue
-                
-                return fresh_engine
+                try:
+                    # Configure with captured working settings
+                    if self.working_tts_engine:
+                        fresh_engine.setProperty('rate', self.working_tts_engine['rate'])
+                        fresh_engine.setProperty('volume', self.working_tts_engine['volume'])
+                        if self.working_tts_engine['voice']:
+                            fresh_engine.setProperty('voice', self.working_tts_engine['voice'])
+                    else:
+                        # Fallback to instance settings
+                        fresh_engine.setProperty('rate', effective_config.get('rate', self.rate))
+                        fresh_engine.setProperty('volume', effective_config.get('volume', self.volume))
+                    
+                    # Apply emotion modifications
+                    modified_text = self._apply_emotion_to_text(text, effective_config.get('emotion', 'neutral'))
+                    
+                    self.logger.info(f"🗣️ Fresh engine TTS: '{modified_text}'")
+                    start_time = time.time()
+                    
+                    # Use fresh engine
+                    fresh_engine.say(modified_text)
+                    fresh_engine.runAndWait()
+                    
+                    duration = time.time() - start_time
+                    self.logger.info(f"✅ Fresh engine TTS completed in {duration:.2f} seconds")
+                    
+                    # Clean up fresh engine
+                    try:
+                        fresh_engine.stop()
+                        del fresh_engine
+                    except:
+                        pass
+                    
+                    return duration > 1.0  # Success if normal timing
+                    
+                except Exception as e:
+                    self.logger.error(f"Fresh engine TTS failed: {e}")
+                    try:
+                        fresh_engine.stop()
+                        del fresh_engine
+                    except:
+                        pass
+                    return False
             
-            # Create fresh engine in executor
+            # Run in executor
             loop = asyncio.get_event_loop()
-            self.tts_engine = await loop.run_in_executor(None, create_fresh_engine)
+            result = await loop.run_in_executor(None, speak_with_fresh)
             
-            self.logger.info("✅ Fresh TTS engine created with clean audio session")
+            return result
             
         except Exception as e:
-            self.logger.error(f"Failed to reinitialize TTS engine: {e}")
-            # Fallback: try to restore any engine
-            try:
-                import pyttsx3
-                self.tts_engine = pyttsx3.init()
-            except:
-                pass
+            self.logger.error(f"Failed to speak with fresh engine: {e}")
+            return False
 
     async def shutdown(self):
         """Shutdown voice synthesis"""
