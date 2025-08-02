@@ -43,6 +43,9 @@ class SAGEApplication:
         # TTS queue for main thread context
         self.tts_queue = asyncio.Queue(maxsize=10)
         
+        # Conversation state manager
+        self.conversation_manager = None
+        
     async def initialize(self) -> bool:
         """Initialize all SAGE components"""
         try:
@@ -159,6 +162,12 @@ class SAGEApplication:
             else:
                 print("🔄 Shutting down SAGE...")
                 
+            # Shutdown conversation manager
+            if self.conversation_manager:
+                await self.conversation_manager.shutdown()
+                if main_log:
+                    main_log.info("Conversation manager stopped")
+            
             # Shutdown modules first
             if self.plugin_manager:
                 await self.plugin_manager.unload_all_modules()
@@ -352,7 +361,7 @@ class SAGEApplication:
             print("   Note: This is normal in WSL or systems without audio hardware")
     
     async def _process_voice_commands(self) -> None:
-        """Process incoming voice commands from voice recognition"""
+        """Process incoming voice commands using conversation state management"""
         try:
             voice_module = self.plugin_manager.get_module('voice')
             nlp_module = self.plugin_manager.get_module('nlp')
@@ -361,12 +370,27 @@ class SAGEApplication:
             if not voice_module:
                 main_log.error("Voice module not available for command processing")
                 return
-                
-            main_log.info("Voice command processing started")
+            
+            # Initialize conversation state manager
+            from modules.voice.conversation_state import ConversationManager, ConversationState
+            self.conversation_manager = ConversationManager(self.logger.get_logger("conversation"))
+            
+            # Register state change callbacks
+            self.conversation_manager.register_state_callback(
+                ConversationState.SLEEPING, 
+                self._on_conversation_sleeping
+            )
+            self.conversation_manager.register_state_callback(
+                ConversationState.LISTENING, 
+                self._on_conversation_listening
+            )
+            
+            main_log.info("Voice command processing started with conversation state management")
+            print(f"💬 Conversation state: {self.conversation_manager.get_state_description()}")
             
             while self.running and not self.shutdown_event.is_set():
                 try:
-                    # Check for voice input with timeout (longer to allow transcription time)
+                    # Check for voice input with timeout
                     voice_input = await asyncio.wait_for(
                         voice_module.get_voice_input(), 
                         timeout=0.5
@@ -379,73 +403,11 @@ class SAGEApplication:
                         main_log.info(f"Voice input received: '{text}' (confidence: {confidence:.2f})")
                         print(f"🗣️  Heard: '{text}' (confidence: {confidence:.2f})")
                         
-                        # Check for wake words
-                        wake_words = ['sage', 'hey sage', 'computer', 'hey computer']
-                        text_lower = text.lower()
+                        # Process input through conversation state manager
+                        action_result = self.conversation_manager.process_voice_input(text, confidence)
                         
-                        wake_word_detected = False
-                        command_text = text_lower
-                        
-                        for wake_word in wake_words:
-                            if wake_word in text_lower:
-                                wake_word_detected = True
-                                # Remove wake word from command
-                                command_text = text_lower.replace(wake_word, '').strip()
-                                break
-                        
-                        if wake_word_detected and command_text:
-                            print(f"✅ Wake word detected! Processing: '{command_text}'")
-                            main_log.info(f"Processing command: '{command_text}'")
-                            
-                            # Completely stop listening BEFORE processing to prevent feedback
-                            print("🔇 Stopping listening during processing...")
-                            await voice_module.stop_listening()
-                            
-                            # Wait for audio resources to fully release
-                            print("⏸️ Waiting for audio resources to release...")
-                            await asyncio.sleep(1.0)
-                            
-                            # Process command through NLP
-                            if nlp_module:
-                                try:
-                                    # Analyze intent
-                                    intent_result = await nlp_module.analyze_intent(command_text)
-                                    print(f"🧠 Intent: {intent_result.get('intent', 'unknown')} (confidence: {intent_result.get('confidence', 0):.2f})")
-                                    
-                                    # Route to appropriate module (this includes TTS)
-                                    await self._route_voice_command(command_text, intent_result)
-                                    
-                                except Exception as e:
-                                    main_log.error(f"NLP processing failed: {e}")
-                                    print(f"❌ Could not process command: {e}")
-                                    await voice_module.speak_text("Sorry, I couldn't understand that command.")
-                            else:
-                                # Basic fallback without NLP
-                                print("🔄 Processing without NLP module...")
-                                await self._route_voice_command(command_text, {'intent': 'unknown'})
-                            
-                            # Wait for voice synthesis to complete
-                            print("⏸️ Waiting for speech to complete...")
-                            await asyncio.sleep(2.0)  # Give time for TTS to finish
-                            
-                            # Restart listening after speech
-                            print("🎤 Restarting listening for next command...")
-                            await voice_module.start_listening()
-                                
-                        elif wake_word_detected:
-                            print("👋 Wake word detected but no command given")
-                            print("🔇 Stopping listening during speech...")
-                            await voice_module.stop_listening()
-                            
-                            await voice_module.speak_text("Yes? What can I help you with?")
-                            print("⏸️ Waiting for speech to complete...")
-                            await asyncio.sleep(3.0)  # Give time for TTS to finish
-                            print("🎤 Restarting listening for next command...")
-                            await voice_module.start_listening()
-                        else:
-                            # No wake word - ignore and resume listening immediately
-                            print(f"⚠️  No wake word detected in: '{text}'")
-                            voice_module.resume_listening()
+                        # Handle the action result
+                        await self._handle_conversation_action(action_result, voice_module, nlp_module, main_log)
                     
                 except asyncio.TimeoutError:
                     # Normal timeout - give brief moment for transcription to complete
@@ -458,6 +420,148 @@ class SAGEApplication:
         except Exception as e:
             main_log.error(f"Voice command processing failed: {e}")
             print(f"❌ Voice command processing error: {e}")
+    
+    async def _handle_conversation_action(self, action_result: dict, voice_module, nlp_module, main_log):
+        """Handle actions from conversation state manager"""
+        try:
+            action = action_result.get("action")
+            
+            if action == "ignore":
+                # Silently ignore input (common for no wake word in sleeping state)
+                return
+                
+            elif action == "acknowledge_wake":
+                # Respond to wake word without command
+                response = action_result.get("response", "Yes? What can I help you with?")
+                print(f"👋 {response}")
+                await self._speak_and_manage_audio(response, voice_module)
+                
+            elif action == "process_command":
+                # Process a command
+                command = action_result.get("command")
+                original_text = action_result.get("original_text")
+                confidence = action_result.get("confidence", 0.0)
+                
+                print(f"🎯 Processing command: '{command}'")
+                await self._process_command_with_confirmation(command, original_text, confidence, voice_module, nlp_module, main_log)
+                
+            elif action == "execute_command":
+                # Execute confirmed command
+                command = action_result.get("command")
+                command_data = action_result.get("command_data", {})
+                
+                print(f"✅ Executing confirmed command: '{command}'")
+                await self._execute_confirmed_command(command, command_data, voice_module, nlp_module, main_log)
+                
+            elif action == "cancel_command":
+                # Command was cancelled
+                response = action_result.get("response", "Okay, cancelled.")
+                print(f"❌ {response}")
+                await self._speak_and_manage_audio(response, voice_module)
+                
+            elif action == "clarify":
+                # Need clarification
+                response = action_result.get("response", "I didn't understand.")
+                print(f"❓ {response}")
+                await self._speak_and_manage_audio(response, voice_module)
+                
+            else:
+                main_log.warning(f"Unknown conversation action: {action}")
+                
+        except Exception as e:
+            main_log.error(f"Error handling conversation action: {e}")
+            print(f"❌ Conversation action error: {e}")
+    
+    async def _process_command_with_confirmation(self, command: str, original_text: str, confidence: float, voice_module, nlp_module, main_log):
+        """Process a command and request confirmation for actions"""
+        try:
+            # Analyze intent
+            if nlp_module:
+                intent_result = await nlp_module.analyze_intent(command)
+                print(f"🧠 Intent: {intent_result.get('intent', 'unknown')} (confidence: {intent_result.get('confidence', 0):.2f})")
+            else:
+                intent_result = {'intent': 'unknown', 'confidence': 0.0}
+            
+            intent = intent_result.get('intent', 'unknown')
+            
+            # Determine if this command needs confirmation
+            if self._command_needs_confirmation(intent, command):
+                confirmation_message = self._generate_confirmation_message(intent, command, intent_result)
+                self.conversation_manager.request_confirmation(command, intent_result, confirmation_message)
+                print(f"❓ {confirmation_message}")
+                await self._speak_and_manage_audio(confirmation_message, voice_module)
+            else:
+                # Execute directly for simple queries
+                await self._execute_confirmed_command(command, intent_result, voice_module, nlp_module, main_log)
+                
+        except Exception as e:
+            main_log.error(f"Error processing command with confirmation: {e}")
+            await self._speak_and_manage_audio("Sorry, I had trouble processing that command.", voice_module)
+    
+    def _command_needs_confirmation(self, intent: str, command: str) -> bool:
+        """Determine if a command needs confirmation before execution"""
+        # Commands that modify data or perform actions need confirmation
+        action_intents = ['calendar', 'schedule', 'meeting', 'event', 'appointment']
+        
+        # Simple queries don't need confirmation
+        query_intents = ['time', 'clock', 'current_time', 'time_query']
+        
+        if intent in action_intents:
+            return True
+        elif intent in query_intents:
+            return False
+        else:
+            # For unknown intents, check for action keywords
+            action_keywords = ['schedule', 'create', 'add', 'book', 'set', 'remind', 'call', 'send']
+            return any(keyword in command.lower() for keyword in action_keywords)
+    
+    def _generate_confirmation_message(self, intent: str, command: str, intent_result: dict) -> str:
+        """Generate appropriate confirmation message for the command"""
+        if intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment']:
+            return f"Do you want me to check your calendar or schedule something? Please confirm."
+        elif 'schedule' in command.lower() or 'meeting' in command.lower():
+            return f"Do you want me to schedule that for you?"
+        else:
+            return f"Do you want me to proceed with: {command}?"
+    
+    async def _execute_confirmed_command(self, command: str, command_data: dict, voice_module, nlp_module, main_log):
+        """Execute a confirmed command"""
+        try:
+            # Route to existing command processing logic
+            await self._route_voice_command(command, command_data)
+            self.conversation_manager.command_completed(success=True)
+            
+        except Exception as e:
+            main_log.error(f"Error executing confirmed command: {e}")
+            await self._speak_and_manage_audio("Sorry, I had trouble executing that command.", voice_module)
+            self.conversation_manager.command_completed(success=False)
+    
+    async def _speak_and_manage_audio(self, text: str, voice_module):
+        """Speak text and manage audio resources properly"""
+        try:
+            # Stop listening before speaking
+            await voice_module.stop_listening()
+            await asyncio.sleep(0.5)  # Brief pause for audio resources
+            
+            # Speak the text
+            await voice_module.speak_text(text)
+            
+            # Wait for speech to complete
+            await asyncio.sleep(2.0)
+            
+            # Restart listening
+            await voice_module.start_listening()
+            
+        except Exception as e:
+            print(f"❌ Error in speak and manage audio: {e}")
+    
+    async def _on_conversation_sleeping(self, old_state, new_state, reason):
+        """Callback when conversation enters sleeping state"""
+        print(f"😴 Conversation sleeping - say wake word to activate")
+    
+    async def _on_conversation_listening(self, old_state, new_state, reason):
+        """Callback when conversation enters listening state"""
+        print(f"👂 Listening for commands (no wake word needed)")
     
     async def _route_voice_command(self, command_text: str, intent_result: dict) -> None:
         """Route voice commands to appropriate modules"""
