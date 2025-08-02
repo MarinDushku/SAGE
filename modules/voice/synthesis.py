@@ -172,6 +172,11 @@ class VoiceSynthesis:
         if not text or not text.strip():
             self.logger.warning("Empty text provided for synthesis")
             return False
+        
+        # Test: Reinitialize TTS engine if this is likely a command response
+        if hasattr(self, 'working_tts_engine') and self.working_tts_engine:
+            self.logger.info("🔄 Creating fresh TTS engine to avoid audio session contamination...")
+            await self._reinitialize_fresh_tts_engine()
             
         start_time = time.time()
         
@@ -396,6 +401,70 @@ class VoiceSynthesis:
             self.logger.error(f"Error stopping speech: {e}")
             return False
             
+    async def _reinitialize_fresh_tts_engine(self):
+        """Completely reinitialize TTS engine to get fresh audio session"""
+        try:
+            self.logger.info("🗑️ Destroying contaminated TTS engine...")
+            
+            # Completely destroy old engine
+            if self.tts_engine:
+                try:
+                    self.tts_engine.stop()
+                    del self.tts_engine
+                    self.tts_engine = None
+                except Exception as e:
+                    self.logger.warning(f"Error destroying old TTS engine: {e}")
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            # Brief delay to let audio system reset
+            import asyncio
+            await asyncio.sleep(0.5)
+            
+            self.logger.info("🔧 Creating completely fresh TTS engine...")
+            
+            # Create brand new TTS engine in executor
+            def create_fresh_engine():
+                import pyttsx3
+                fresh_engine = pyttsx3.init()
+                
+                # Configure with original settings
+                fresh_engine.setProperty('rate', self.rate)
+                fresh_engine.setProperty('volume', self.volume)
+                
+                # Set voice if we have one configured
+                if self.voice_id:
+                    voices = fresh_engine.getProperty('voices')
+                    if voices:
+                        for voice in voices:
+                            try:
+                                voice_id = getattr(voice, 'id', None) or ""
+                                voice_name = getattr(voice, 'name', None) or ""
+                                if self.voice_id and (self.voice_id in voice_id or self.voice_id in voice_name):
+                                    fresh_engine.setProperty('voice', voice.id)
+                                    break
+                            except Exception:
+                                continue
+                
+                return fresh_engine
+            
+            # Create fresh engine in executor
+            loop = asyncio.get_event_loop()
+            self.tts_engine = await loop.run_in_executor(None, create_fresh_engine)
+            
+            self.logger.info("✅ Fresh TTS engine created with clean audio session")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to reinitialize TTS engine: {e}")
+            # Fallback: try to restore any engine
+            try:
+                import pyttsx3
+                self.tts_engine = pyttsx3.init()
+            except:
+                pass
+
     async def shutdown(self):
         """Shutdown voice synthesis"""
         await self.stop_speaking()
