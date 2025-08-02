@@ -438,12 +438,20 @@ class VoiceSynthesis:
                     self.logger.info("🔊 Playing generated audio...")
                     play_start = time.time()
                     
-                    # Use Windows built-in player to avoid audio driver conflicts
+                    # Use Windows Media Player to handle MP3 files
                     import subprocess
                     result = subprocess.run([
                         'powershell', '-c', 
-                        f'(New-Object Media.SoundPlayer "{temp_path}").PlaySync()'
-                    ], capture_output=True, timeout=10)
+                        f'Add-Type -AssemblyName presentationCore; ' +
+                        f'$mediaPlayer = New-Object system.windows.media.mediaplayer; ' +
+                        f'$mediaPlayer.open([uri]"{temp_path}"); ' +
+                        f'$mediaPlayer.Play(); ' +
+                        f'Start-Sleep -Milliseconds 100; ' +
+                        f'while($mediaPlayer.NaturalDuration.HasTimeSpan -eq $false){{Start-Sleep -Milliseconds 50}}; ' +
+                        f'$duration = $mediaPlayer.NaturalDuration.TimeSpan.TotalMilliseconds; ' +
+                        f'Start-Sleep -Milliseconds $duration; ' +
+                        f'$mediaPlayer.Stop(); $mediaPlayer.Close()'
+                    ], capture_output=True, timeout=15)
                     
                     play_time = time.time() - play_start
                     total_time = time.time() - start_time
