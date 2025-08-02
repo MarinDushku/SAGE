@@ -40,6 +40,9 @@ class SAGEApplication:
         # Signal handling
         self.shutdown_event = asyncio.Event()
         
+        # TTS queue for main thread context
+        self.tts_queue = asyncio.Queue(maxsize=10)
+        
     async def initialize(self) -> bool:
         """Initialize all SAGE components"""
         try:
@@ -271,14 +274,27 @@ class SAGEApplication:
                     print(f"⚠️  Could not start voice recognition: {e}")
                     main_log.warning(f"Voice recognition startup failed: {e}")
 
-            # Main event loop
+            # Main event loop with TTS processing
             try:
                 while self.running and not self.shutdown_event.is_set():
                     try:
+                        # Check for TTS requests from command processing
+                        try:
+                            tts_request = self.tts_queue.get_nowait()
+                            print(f"🎯 Processing TTS in main thread context: '{tts_request['text']}'")
+                            
+                            voice_module = self.plugin_manager.get_module('voice')
+                            if voice_module:
+                                # Process TTS in the SAME context as welcome message
+                                result = await voice_module.speak_text(tts_request['text'])
+                                print(f"✅ Main thread TTS result: {result}")
+                        except asyncio.QueueEmpty:
+                            pass
+                        
                         # Wait for shutdown signal or timeout
                         await asyncio.wait_for(
                             self.shutdown_event.wait(), 
-                            timeout=10.0
+                            timeout=1.0  # Shorter timeout to check TTS queue more frequently
                         )
                         break
                     except asyncio.TimeoutError:
@@ -484,7 +500,14 @@ class SAGEApplication:
                     current_time = datetime.now().strftime("%I:%M %p")
                     response = f"It's currently {current_time}"
                     print(f"🕐 {response}")
-                    await voice_module.speak_text(response)
+                    
+                    # Queue TTS for main thread processing instead of direct call
+                    try:
+                        await self.tts_queue.put({'text': response})
+                        print("📤 TTS request queued for main thread")
+                    except asyncio.QueueFull:
+                        print("⚠️ TTS queue full, using direct call")
+                        await voice_module.speak_text(response)
                 except Exception as e:
                     main_log.error(f"Time query error: {e}")
                     await voice_module.speak_text("Sorry, I couldn't get the current time.")
