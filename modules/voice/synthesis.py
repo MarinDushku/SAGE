@@ -74,6 +74,7 @@ class VoiceSynthesis:
         
         # Components
         self.tts_engine = None
+        self.working_tts_engine = None  # Store the working engine from welcome message
         self.synthesis_lock = threading.Lock()
         
         # Enhanced statistics
@@ -310,9 +311,57 @@ class VoiceSynthesis:
                 duration = end_time - start_time
                 self.logger.info(f"✅ TTS completed in {duration:.2f} seconds")
                 
+                # If TTS was successful (normal timing), capture this working engine
+                if duration > 2.0 and len(modified_text) > 10:
+                    self.logger.info("💾 Capturing working TTS engine state...")
+                    try:
+                        # Store a snapshot of the working engine's properties
+                        if not self.working_tts_engine:
+                            self.working_tts_engine = {
+                                'rate': self.tts_engine.getProperty('rate'),
+                                'volume': self.tts_engine.getProperty('volume'),
+                                'voice': self.tts_engine.getProperty('voice'),
+                                'voices': self.tts_engine.getProperty('voices')
+                            }
+                            self.logger.info("✅ Working TTS engine state captured")
+                    except Exception as e:
+                        self.logger.warning(f"Could not capture engine state: {e}")
+                
                 # Sanity check - if TTS completed too quickly, something went wrong
                 if duration < 1.0 and len(modified_text) > 10:
                     self.logger.warning(f"⚠️ TTS completed suspiciously fast ({duration:.2f}s) for text length {len(modified_text)}")
+                    
+                    # Try using the captured working engine state
+                    if self.working_tts_engine:
+                        self.logger.info("🔧 Attempting to restore working TTS engine state...")
+                        try:
+                            # Create fresh engine with working state
+                            import pyttsx3
+                            fresh_engine = pyttsx3.init()
+                            fresh_engine.setProperty('rate', self.working_tts_engine['rate'])
+                            fresh_engine.setProperty('volume', self.working_tts_engine['volume'])
+                            if self.working_tts_engine['voice']:
+                                fresh_engine.setProperty('voice', self.working_tts_engine['voice'])
+                            
+                            self.logger.info("🔄 Retrying TTS with working engine state...")
+                            retry_start = time.time()
+                            fresh_engine.say(modified_text)
+                            fresh_engine.runAndWait()
+                            retry_duration = time.time() - retry_start
+                            
+                            try:
+                                fresh_engine.stop()
+                                del fresh_engine
+                            except:
+                                pass
+                            
+                            self.logger.info(f"✅ Retry with working state completed in {retry_duration:.2f} seconds")
+                            if retry_duration > 1.0:
+                                return True
+                                
+                        except Exception as e:
+                            self.logger.error(f"Failed to restore working engine state: {e}")
+                    
                     return False
                 
                 return True
