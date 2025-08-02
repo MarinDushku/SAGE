@@ -173,10 +173,10 @@ class VoiceSynthesis:
             self.logger.warning("Empty text provided for synthesis")
             return False
         
-        # Test: Use parallel fresh TTS engine if this is likely a command response
+        # Test: Use free cloud TTS to bypass Windows audio contamination
         if hasattr(self, 'working_tts_engine') and self.working_tts_engine:
-            self.logger.info("🔄 Using parallel fresh TTS engine to avoid audio session contamination...")
-            return await self._speak_with_fresh_engine(text, voice_config, profile, priority)
+            self.logger.info("🌐 Using free cloud TTS to bypass Windows audio contamination...")
+            return await self._speak_with_free_cloud_tts(text, voice_config, profile, priority)
             
         start_time = time.time()
         
@@ -401,6 +401,83 @@ class VoiceSynthesis:
             self.logger.error(f"Error stopping speech: {e}")
             return False
             
+    async def _speak_with_free_cloud_tts(self, text: str, voice_config: Optional[Dict[str, Any]] = None, 
+                                        profile: str = 'default', priority: str = 'normal') -> bool:
+        """Speak using free cloud TTS (gTTS) to bypass Windows audio issues"""
+        try:
+            import tempfile
+            import os
+            import time
+            
+            self.logger.info("🔧 Generating speech with free cloud TTS...")
+            
+            def generate_and_play():
+                try:
+                    # Import gTTS
+                    from gtts import gTTS
+                    
+                    # Apply emotion modifications
+                    effective_config = {"emotion": "neutral"}  # Simple for now
+                    modified_text = self._apply_emotion_to_text(text, effective_config.get('emotion', 'neutral'))
+                    
+                    self.logger.info(f"🌐 Cloud TTS generating: '{modified_text}'")
+                    start_time = time.time()
+                    
+                    # Generate speech with gTTS
+                    tts = gTTS(text=modified_text, lang='en', slow=False)
+                    
+                    # Save to temporary file
+                    with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                        temp_path = temp_file.name
+                        tts.save(temp_path)
+                    
+                    generation_time = time.time() - start_time
+                    self.logger.info(f"✅ Cloud TTS generated in {generation_time:.2f} seconds")
+                    
+                    # Play the audio file using Windows media player
+                    self.logger.info("🔊 Playing generated audio...")
+                    play_start = time.time()
+                    
+                    # Use Windows built-in player to avoid audio driver conflicts
+                    import subprocess
+                    result = subprocess.run([
+                        'powershell', '-c', 
+                        f'(New-Object Media.SoundPlayer "{temp_path}").PlaySync()'
+                    ], capture_output=True, timeout=10)
+                    
+                    play_time = time.time() - play_start
+                    total_time = time.time() - start_time
+                    
+                    # Clean up
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                    
+                    if result.returncode == 0:
+                        self.logger.info(f"✅ Cloud TTS playback completed in {play_time:.2f}s (total: {total_time:.2f}s)")
+                        return True
+                    else:
+                        self.logger.warning(f"Audio playback had issues: {result.stderr}")
+                        return False
+                        
+                except ImportError:
+                    self.logger.error("gTTS not available. Install with: pip install gtts")
+                    return False
+                except Exception as e:
+                    self.logger.error(f"Cloud TTS failed: {e}")
+                    return False
+            
+            # Run in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, generate_and_play)
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Failed to speak with cloud TTS: {e}")
+            return False
+
     async def _speak_with_fresh_engine(self, text: str, voice_config: Optional[Dict[str, Any]] = None, 
                                       profile: str = 'default', priority: str = 'normal') -> bool:
         """Speak using a completely fresh TTS engine without touching the original"""
