@@ -14,10 +14,11 @@ import inspect
 class FunctionRegistry:
     """Registry of available functions that the LLM can call"""
     
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, calendar_module=None):
         self.logger = logger or logging.getLogger(__name__)
         self.functions: Dict[str, Dict[str, Any]] = {}
         self.handlers: Dict[str, Callable] = {}
+        self.calendar_module = calendar_module
         
         # Register built-in functions
         self._register_builtin_functions()
@@ -214,20 +215,34 @@ class FunctionRegistry:
     
     async def _lookup_calendar(self, date: str, time_range: Optional[str] = None) -> str:
         """Lookup calendar events"""
-        # This would interface with the actual calendar module
-        # For now, return a placeholder
         try:
             # Parse relative dates
             target_date = self._parse_relative_date(date)
             date_str = target_date.strftime("%Y-%m-%d")
             
-            # Simulate calendar lookup
-            if time_range:
-                return f"Checking calendar for {date_str} ({time_range}): No events found"
+            if self.calendar_module:
+                # Use real calendar module
+                start_time = target_date.timestamp()
+                end_time = (target_date + timedelta(days=1)).timestamp()
+                
+                events = await self.calendar_module.get_events_in_range(start_time, end_time)
+                
+                if events:
+                    event_list = []
+                    for event in events:
+                        event_time = datetime.fromtimestamp(event.start_time).strftime("%I:%M %p")
+                        event_list.append(f"• {event.title} at {event_time}")
+                    
+                    events_text = "\n".join(event_list)
+                    return f"Events for {date_str}:\n{events_text}"
+                else:
+                    return f"No events found for {date_str}"
             else:
+                # Fallback if no calendar module
                 return f"Checking calendar for {date_str}: No events found"
                 
         except Exception as e:
+            self.logger.error(f"Error looking up calendar: {e}")
             return f"Error looking up calendar: {str(e)}"
     
     async def _add_calendar_event(self, title: str, date: str, time: Optional[str] = None, 
@@ -237,18 +252,61 @@ class FunctionRegistry:
             # Parse date and time
             target_date = self._parse_relative_date(date)
             
-            event_info = f"Event '{title}' on {target_date.strftime('%Y-%m-%d')}"
+            # Default time if not specified
             if time:
-                event_info += f" at {time}"
-            if duration:
-                event_info += f" for {duration}"
-            if location:
-                event_info += f" at {location}"
+                # Parse time - simple parsing for common formats
+                import re
+                time_clean = time.lower().strip()
+                
+                # Try to extract hour from various formats
+                hour = 9  # default
+                minute = 0  # default
+                
+                # Match patterns like "9am", "9 am", "9:30am", etc.
+                time_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?', time_clean)
+                if time_match:
+                    hour = int(time_match.group(1))
+                    if time_match.group(2):
+                        minute = int(time_match.group(2))
+                    if time_match.group(3) and 'p' in time_match.group(3) and hour != 12:
+                        hour += 12
+                    elif time_match.group(3) and 'a' in time_match.group(3) and hour == 12:
+                        hour = 0
+                
+                # Combine date and time
+                event_datetime = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            else:
+                # Default to 9 AM if no time specified
+                event_datetime = target_date.replace(hour=9, minute=0, second=0, microsecond=0)
             
-            # This would interface with the actual calendar module
-            return f"Successfully scheduled: {event_info}"
+            if self.calendar_module:
+                # Use real calendar module
+                start_time = event_datetime.timestamp()
+                end_time = (event_datetime + timedelta(hours=1)).timestamp()  # Default 1 hour duration
+                
+                # Create event using calendar module
+                success = await self.calendar_module.create_event(
+                    title=title,
+                    description="",
+                    start_time=start_time,
+                    end_time=end_time,
+                    location=location or ""
+                )
+                
+                if success:
+                    formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
+                    return f"Successfully scheduled: {title} on {formatted_time}"
+                else:
+                    return f"Failed to schedule event: {title}"
+            else:
+                # Fallback if no calendar module
+                event_info = f"Event '{title}' on {target_date.strftime('%Y-%m-%d')}"
+                if time:
+                    event_info += f" at {time}"
+                return f"Successfully scheduled: {event_info}"
             
         except Exception as e:
+            self.logger.error(f"Error adding calendar event: {e}")
             return f"Error adding event: {str(e)}"
     
     def _get_system_status(self) -> str:

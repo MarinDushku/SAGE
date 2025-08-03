@@ -377,7 +377,10 @@ class SAGEApplication:
             
             # Initialize function calling system
             from modules.function_calling import FunctionRegistry, FunctionCallingProcessor
-            self.function_registry = FunctionRegistry(self.logger.get_logger("functions"))
+            self.function_registry = FunctionRegistry(
+                self.logger.get_logger("functions"),
+                calendar_module  # Pass calendar module for real integration
+            )
             self.function_processor = FunctionCallingProcessor(
                 self.function_registry, 
                 nlp_module, 
