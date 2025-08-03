@@ -225,7 +225,13 @@ class FunctionRegistry:
                 start_time = target_date.timestamp()
                 end_time = (target_date + timedelta(days=1)).timestamp()
                 
-                events = await self.calendar_module._get_events_in_range(start_time, end_time)
+                self.logger.info(f"Looking up events from {start_time} to {end_time}")
+                try:
+                    events = await self.calendar_module._get_events_in_range(start_time, end_time)
+                    self.logger.info(f"Found {len(events)} events")
+                except Exception as e:
+                    self.logger.error(f"Exception in _get_events_in_range: {e}")
+                    return f"Error looking up calendar: {str(e)}"
                 
                 if events:
                     event_list = []
@@ -299,13 +305,19 @@ class FunctionRegistry:
                 )
                 
                 # Add event using calendar module
-                success = await self.calendar_module.add_event(calendar_event)
-                
-                if success:
-                    formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
-                    return f"Successfully scheduled: {title} on {formatted_time}"
-                else:
-                    return f"Failed to schedule event: {title}"
+                self.logger.info(f"Attempting to add event to calendar: {title}")
+                try:
+                    success = await self.calendar_module.add_event(calendar_event)
+                    self.logger.info(f"Calendar add_event returned: {success}")
+                    
+                    if success:
+                        formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
+                        return f"Successfully scheduled: {title} on {formatted_time}"
+                    else:
+                        return f"Failed to schedule event: {title}"
+                except Exception as e:
+                    self.logger.error(f"Exception in add_event: {e}")
+                    return f"Error scheduling event: {str(e)}"
             else:
                 # Fallback if no calendar module
                 event_info = f"Event '{title}' on {target_date.strftime('%Y-%m-%d')}"
