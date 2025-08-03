@@ -290,24 +290,30 @@ class FunctionCallingProcessor:
             # Create prompt for LLM
             function_catalog = self.function_registry.get_function_catalog()
             
-            # Simple but complete prompt with available functions
-            prompt = f"""User said: "{user_input}"
+            # Ultra-simple prompt without confusing examples
+            prompt = f"""TASK: Analyze user request and call appropriate function.
 
-Available functions:
-- get_current_time (no parameters) - Get current time
-- get_current_date (no parameters) - Get current date  
-- lookup_calendar (date parameter) - Check calendar for date
-- add_calendar_event (title, date, time parameters) - Add new event
+USER REQUEST: "{user_input}"
 
-Choose correct function or give direct response:
+AVAILABLE FUNCTIONS:
+1. get_current_time - Get current time
+2. lookup_calendar - Check calendar (needs date parameter)  
+3. add_calendar_event - Add event (needs title, date, time)
 
-Examples:
-Time question: {{"functions_to_call": [{{"function_name": "get_current_time", "parameters": {{}}}}]}}
-Calendar check: {{"functions_to_call": [{{"function_name": "lookup_calendar", "parameters": {{"date": "tomorrow"}}}}]}}
-Add meeting: {{"functions_to_call": [{{"function_name": "add_calendar_event", "parameters": {{"title": "Meeting", "date": "tomorrow", "time": "9am"}}}}]}}
-Other: {{"functions_to_call": [], "response": "Your response"}}
+INSTRUCTIONS:
+- If asking for TIME: call get_current_time
+- If asking about SCHEDULE/CALENDAR: call lookup_calendar  
+- If want to ADD/SCHEDULE meeting: call add_calendar_event
+- Otherwise: give direct response
 
-Your JSON:"""
+RESPOND WITH JSON ONLY:
+{{"functions_to_call": [{{"function_name": "FUNCTION_NAME", "parameters": {{}}}}]}}
+
+OR
+
+{{"functions_to_call": [], "response": "Direct answer"}}
+
+JSON RESPONSE:"""
 
             # Get LLM response
             if self.nlp_module:
@@ -362,6 +368,11 @@ Your JSON:"""
                 # Extract only the first JSON object
                 first_json = llm_response[json_start:first_json_end]
                 self.logger.info(f"Attempting to parse first JSON: {first_json}")
+                
+                # Reject template responses
+                if "FUNCTION_NAME" in first_json or "your response" in first_json.lower():
+                    self.logger.warning("LLM returned template, using fallback")
+                    return await self._fallback_processing(original_request)
                 
                 try:
                     parsed = json.loads(first_json)
