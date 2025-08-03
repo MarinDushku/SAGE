@@ -24,7 +24,8 @@ recognition:
   # Common settings
   energy_threshold: 300
   dynamic_energy_threshold: true
-  pause_threshold: 0.8
+  pause_threshold: 1.5
+  phrase_timeout: 0.6
   operation_timeout: 5
   
 synthesis:

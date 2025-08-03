@@ -31,7 +31,7 @@ class ConversationManager:
         
         # Configuration
         self.conversation_timeout = 30.0  # 30 seconds of silence returns to sleeping
-        self.confirmation_timeout = 10.0  # 10 seconds to respond to confirmation
+        self.confirmation_timeout = 20.0  # 20 seconds to respond to confirmation (increased from 10)
         self.wake_words = ['sage', 'hey sage', 'computer', 'hey computer']
         
         # State tracking

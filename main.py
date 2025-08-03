@@ -517,10 +517,18 @@ class SAGEApplication:
     
     def _generate_confirmation_message(self, intent: str, command: str, intent_result: dict) -> str:
         """Generate appropriate confirmation message for the command"""
-        if intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment']:
-            return f"Do you want me to check your calendar or schedule something? Please confirm."
-        elif 'schedule' in command.lower() or 'meeting' in command.lower():
-            return f"Do you want me to schedule that for you?"
+        command_lower = command.lower()
+        
+        # Distinguish between checking calendar vs scheduling
+        if intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment', 'check_calendar']:
+            # Check if this is a query about existing events
+            if any(word in command_lower for word in ['do i have', 'what do i have', 'check', 'what\'s on', 'any meetings', 'any events']):
+                return f"Do you want me to check your calendar for upcoming events?"
+            # Check if this is about creating/scheduling something
+            elif any(word in command_lower for word in ['schedule', 'book', 'create', 'add', 'set up']):
+                return f"Do you want me to schedule that for you?"
+            else:
+                return f"Do you want me to check your calendar or schedule something?"
         else:
             return f"Do you want me to proceed with: {command}?"
     
