@@ -222,10 +222,15 @@ class FunctionRegistry:
             
             if self.calendar_module:
                 # Use direct database operations to bypass calendar module issues
-                start_time = target_date.timestamp()
-                end_time = (target_date + timedelta(days=1)).timestamp()
+                # Ensure we search the full day by setting start time to 00:00:00 and end time to 23:59:59
+                start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
                 
-                self.logger.info(f"Looking up events from {start_time} to {end_time}")
+                start_time = start_of_day.timestamp()
+                end_time = end_of_day.timestamp()
+                
+                self.logger.info(f"Looking up events from {start_time} to {end_time} (full day {date_str})")
+                self.logger.info(f"Date range: {start_of_day} to {end_of_day}")
                 try:
                     # Direct SQLite database query
                     import sqlite3
@@ -314,6 +319,7 @@ class FunctionRegistry:
                 end_time = (event_datetime + timedelta(hours=1)).timestamp()  # Default 1 hour duration
                 
                 self.logger.info(f"Attempting to add event to calendar: {title}")
+                self.logger.info(f"Event datetime: {event_datetime}, timestamp: {start_time}")
                 try:
                     # Direct SQLite database insertion
                     import sqlite3
