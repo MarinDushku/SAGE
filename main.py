@@ -546,8 +546,9 @@ class SAGEApplication:
             # Speak the text
             await voice_module.speak_text(text)
             
-            # Wait for speech to complete
-            await asyncio.sleep(2.0)
+            # Wait for speech to actually complete (don't use fixed delay)
+            # The speak_text method should properly await completion
+            pass  # No additional delay needed since speak_text is already awaited
             
             # Restart listening
             await voice_module.start_listening()
