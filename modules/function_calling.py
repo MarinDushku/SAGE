@@ -225,13 +225,13 @@ class FunctionRegistry:
                 start_time = target_date.timestamp()
                 end_time = (target_date + timedelta(days=1)).timestamp()
                 
-                events = await self.calendar_module.get_events_in_range(start_time, end_time)
+                events = await self.calendar_module._get_events_in_range(start_time, end_time)
                 
                 if events:
                     event_list = []
                     for event in events:
-                        event_time = datetime.fromtimestamp(event.start_time).strftime("%I:%M %p")
-                        event_list.append(f"• {event.title} at {event_time}")
+                        event_time = datetime.fromtimestamp(event['start_time']).strftime("%I:%M %p")
+                        event_list.append(f"• {event['title']} at {event_time}")
                     
                     events_text = "\n".join(event_list)
                     return f"Events for {date_str}:\n{events_text}"
@@ -284,14 +284,22 @@ class FunctionRegistry:
                 start_time = event_datetime.timestamp()
                 end_time = (event_datetime + timedelta(hours=1)).timestamp()  # Default 1 hour duration
                 
-                # Create event using calendar module
-                success = await self.calendar_module.create_event(
+                # Import CalendarEvent class
+                from modules.calendar.calendar_module import CalendarEvent
+                import uuid
+                
+                # Create CalendarEvent object
+                calendar_event = CalendarEvent(
+                    event_id=str(uuid.uuid4()),
                     title=title,
                     description="",
                     start_time=start_time,
                     end_time=end_time,
                     location=location or ""
                 )
+                
+                # Add event using calendar module
+                success = await self.calendar_module.add_event(calendar_event)
                 
                 if success:
                     formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
