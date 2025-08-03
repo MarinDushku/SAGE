@@ -290,36 +290,36 @@ class FunctionCallingProcessor:
             # Create prompt for LLM
             function_catalog = self.function_registry.get_function_catalog()
             
-            # Simplified prompt with better examples
-            prompt = f"""You are a function calling assistant. You have these functions available:
+            # Clear, direct prompt with single example
+            prompt = f"""You are a function calling assistant. Available functions:
 
 {function_catalog}
 
-User said: "{user_input}"
+User request: "{user_input}"
 
-If the user is asking for time, call get_current_time.
-If the user is asking for date, call get_current_date.
-If the user is asking about calendar/schedule, call lookup_calendar.
+Rules:
+- Time questions → call get_current_time
+- Date questions → call get_current_date  
+- Calendar/schedule questions → call lookup_calendar with date parameter
+- Other questions → provide direct response
 
-Respond with JSON only:
-
-For function calls:
+Response format (JSON only):
 {{
     "functions_to_call": [
         {{
-            "function_name": "get_current_time",
-            "parameters": {{}}
+            "function_name": "function_name_here",
+            "parameters": {{"param": "value"}}
         }}
     ]
 }}
 
-For conversation:
+OR for direct responses:
 {{
     "functions_to_call": [],
-    "response": "Your response here"
+    "response": "your answer here"
 }}
 
-JSON response:"""
+Your JSON response:"""
 
             # Get LLM response
             if self.nlp_module:
@@ -356,18 +356,34 @@ JSON response:"""
             json_end = llm_response.rfind('}') + 1
             
             if json_start != -1 and json_end > json_start:
+                # Extract only the first JSON object (in case LLM returns multiple)
                 json_str = llm_response[json_start:json_end]
-                self.logger.info(f"Attempting to parse JSON: {json_str}")
+                
+                # Find the end of the first complete JSON object
+                brace_count = 0
+                first_json_end = json_start
+                for i, char in enumerate(llm_response[json_start:], json_start):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            first_json_end = i + 1
+                            break
+                
+                # Extract only the first JSON object
+                first_json = llm_response[json_start:first_json_end]
+                self.logger.info(f"Attempting to parse first JSON: {first_json}")
                 
                 try:
-                    parsed = json.loads(json_str)
+                    parsed = json.loads(first_json)
                     self.logger.info(f"Successfully parsed JSON: {parsed}")
                 except json.JSONDecodeError as json_err:
                     self.logger.warning(f"JSON parsing failed: {json_err}")
                     # Try to fix common JSON issues
-                    json_str = json_str.replace("'", '"')  # Replace single quotes with double quotes
+                    fixed_json = first_json.replace("'", '"')  # Replace single quotes with double quotes
                     try:
-                        parsed = json.loads(json_str)
+                        parsed = json.loads(fixed_json)
                         self.logger.info(f"Fixed and parsed JSON: {parsed}")
                     except json.JSONDecodeError:
                         self.logger.error("Could not fix JSON, falling back")
