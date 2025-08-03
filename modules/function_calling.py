@@ -227,8 +227,16 @@ class FunctionRegistry:
                 
                 self.logger.info(f"Looking up events from {start_time} to {end_time}")
                 try:
-                    events = await self.calendar_module._get_events_in_range(start_time, end_time)
+                    # Add timeout to prevent hanging
+                    import asyncio
+                    events = await asyncio.wait_for(
+                        self.calendar_module._get_events_in_range(start_time, end_time),
+                        timeout=5.0  # 5 second timeout
+                    )
                     self.logger.info(f"Found {len(events)} events")
+                except asyncio.TimeoutError:
+                    self.logger.error("Calendar lookup timed out after 5 seconds")
+                    return f"Timeout looking up calendar for {date_str}"
                 except Exception as e:
                     self.logger.error(f"Exception in _get_events_in_range: {e}")
                     return f"Error looking up calendar: {str(e)}"
@@ -307,7 +315,12 @@ class FunctionRegistry:
                 # Add event using calendar module
                 self.logger.info(f"Attempting to add event to calendar: {title}")
                 try:
-                    success = await self.calendar_module.add_event(calendar_event)
+                    # Add timeout to prevent hanging
+                    import asyncio
+                    success = await asyncio.wait_for(
+                        self.calendar_module.add_event(calendar_event), 
+                        timeout=10.0  # 10 second timeout
+                    )
                     self.logger.info(f"Calendar add_event returned: {success}")
                     
                     if success:
@@ -315,6 +328,9 @@ class FunctionRegistry:
                         return f"Successfully scheduled: {title} on {formatted_time}"
                     else:
                         return f"Failed to schedule event: {title}"
+                except asyncio.TimeoutError:
+                    self.logger.error("Calendar add_event timed out after 10 seconds")
+                    return f"Timeout scheduling event: {title}"
                 except Exception as e:
                     self.logger.error(f"Exception in add_event: {e}")
                     return f"Error scheduling event: {str(e)}"
