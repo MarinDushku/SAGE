@@ -525,16 +525,76 @@ class SAGEApplication:
             return f"Do you want me to proceed with: {command}?"
     
     async def _execute_confirmed_command(self, command: str, command_data: dict, voice_module, nlp_module, main_log):
-        """Execute a confirmed command"""
+        """Execute a confirmed command with proper audio management"""
         try:
-            # Route to existing command processing logic
-            await self._route_voice_command(command, command_data)
+            # Get the response from command processing without speaking
+            response = await self._get_command_response(command, command_data, nlp_module, main_log)
+            
+            if response:
+                # Speak the response using proper audio management
+                await self._speak_and_manage_audio(response, voice_module)
+            
             self.conversation_manager.command_completed(success=True)
             
         except Exception as e:
             main_log.error(f"Error executing confirmed command: {e}")
             await self._speak_and_manage_audio("Sorry, I had trouble executing that command.", voice_module)
             self.conversation_manager.command_completed(success=False)
+    
+    async def _get_command_response(self, command_text: str, intent_result: dict, nlp_module, main_log) -> str:
+        """Get response for a command without speaking it"""
+        try:
+            intent = intent_result.get('intent', 'unknown')
+            
+            # Time queries
+            if intent in ['time', 'clock', 'current_time', 'time_query']:
+                from datetime import datetime
+                current_time = datetime.now().strftime("%I:%M %p")
+                response = f"It's currently {current_time}"
+                print(f"🕐 {response}")
+                return response
+            
+            # Calendar commands
+            elif intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment']:
+                calendar_module = self.plugin_manager.get_module('calendar')
+                if calendar_module:
+                    print("📅 Processing calendar command...")
+                    result = await calendar_module.process_voice_command(command_text)
+                    
+                    if result.get('success'):
+                        response = result.get('response', 'Calendar command processed.')
+                        print(f"✅ Calendar: {response}")
+                        return response
+                    else:
+                        error_msg = result.get('error', 'Calendar command failed.')
+                        print(f"❌ Calendar error: {error_msg}")
+                        return f"Sorry, {error_msg}"
+                else:
+                    return "Calendar module is not available."
+            
+            # General conversation/questions
+            elif intent in ['question', 'conversation', 'general', 'unknown']:
+                if nlp_module:
+                    print("🤖 Processing general query...")
+                    result = await nlp_module.process_text(command_text)
+                    
+                    if result.get('success'):
+                        response = result['response']['text']
+                        print(f"💬 Response: {response[:100]}...")
+                        return response
+                    else:
+                        return "Sorry, I couldn't process that request."
+                else:
+                    return "I'm not sure how to help with that."
+            
+            # Unsupported intents
+            else:
+                main_log.warning(f"Unsupported intent: {intent}")
+                return "I'm not sure how to help with that."
+                
+        except Exception as e:
+            main_log.error(f"Error getting command response: {e}")
+            return "Sorry, I had trouble processing that command."
     
     async def _speak_and_manage_audio(self, text: str, voice_module):
         """Speak text and manage audio resources properly"""
@@ -606,13 +666,8 @@ class SAGEApplication:
                     response = f"It's currently {current_time}"
                     print(f"🕐 {response}")
                     
-                    # Queue TTS for main thread processing instead of direct call
-                    try:
-                        await self.tts_queue.put({'text': response})
-                        print("📤 TTS request queued for main thread")
-                    except asyncio.QueueFull:
-                        print("⚠️ TTS queue full, using direct call")
-                        await voice_module.speak_text(response)
+                    # Use direct TTS through voice module
+                    await voice_module.speak_text(response)
                 except Exception as e:
                     main_log.error(f"Time query error: {e}")
                     await voice_module.speak_text("Sorry, I couldn't get the current time.")
