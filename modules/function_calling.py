@@ -290,45 +290,49 @@ class FunctionCallingProcessor:
             # Create prompt for LLM
             function_catalog = self.function_registry.get_function_catalog()
             
-            prompt = f"""
-AVAILABLE FUNCTIONS:
+            # Simplified prompt with better examples
+            prompt = f"""You are a function calling assistant. You have these functions available:
+
 {function_catalog}
 
-USER REQUEST: "{user_input}"
+User said: "{user_input}"
 
-Analyze the user request and determine:
-1. Which function(s) should be called to fulfill this request
-2. What parameters should be passed to each function
+If the user is asking for time, call get_current_time.
+If the user is asking for date, call get_current_date.
+If the user is asking about calendar/schedule, call lookup_calendar.
 
-Respond in this JSON format:
+Respond with JSON only:
+
+For function calls:
 {{
-    "analysis": "Brief explanation of what the user wants",
     "functions_to_call": [
         {{
-            "function_name": "function_name",
-            "parameters": {{
-                "param1": "value1",
-                "param2": "value2"
-            }},
-            "reasoning": "Why this function with these parameters"
+            "function_name": "get_current_time",
+            "parameters": {{}}
         }}
     ]
 }}
 
-If no functions are needed, respond with:
+For conversation:
 {{
-    "analysis": "This is a conversational request that doesn't require function calls",
     "functions_to_call": [],
-    "response": "Direct response to user"
+    "response": "Your response here"
 }}
-"""
+
+JSON response:"""
 
             # Get LLM response
             if self.nlp_module:
+                self.logger.info(f"Sending prompt to LLM: {prompt[:200]}...")
                 llm_result = await self.nlp_module.process_text(prompt)
                 if llm_result.get('success'):
                     response_text = llm_result['response']['text']
+                    self.logger.info(f"LLM raw response: {response_text}")
                     return await self._parse_llm_response(response_text, user_input)
+                else:
+                    self.logger.warning(f"LLM processing failed: {llm_result}")
+            else:
+                self.logger.warning("No NLP module available for function calling")
             
             # Fallback if NLP module not available
             return await self._fallback_processing(user_input)
@@ -344,62 +348,75 @@ If no functions are needed, respond with:
     async def _parse_llm_response(self, llm_response: str, original_request: str) -> Dict[str, Any]:
         """Parse LLM response and execute function calls"""
         try:
+            # Clean the response
+            llm_response = llm_response.strip()
+            
             # Try to extract JSON from LLM response
             json_start = llm_response.find('{')
             json_end = llm_response.rfind('}') + 1
             
             if json_start != -1 and json_end > json_start:
                 json_str = llm_response[json_start:json_end]
-                parsed = json.loads(json_str)
+                self.logger.info(f"Attempting to parse JSON: {json_str}")
                 
-                analysis = parsed.get('analysis', '')
+                try:
+                    parsed = json.loads(json_str)
+                    self.logger.info(f"Successfully parsed JSON: {parsed}")
+                except json.JSONDecodeError as json_err:
+                    self.logger.warning(f"JSON parsing failed: {json_err}")
+                    # Try to fix common JSON issues
+                    json_str = json_str.replace("'", '"')  # Replace single quotes with double quotes
+                    try:
+                        parsed = json.loads(json_str)
+                        self.logger.info(f"Fixed and parsed JSON: {parsed}")
+                    except json.JSONDecodeError:
+                        self.logger.error("Could not fix JSON, falling back")
+                        return await self._fallback_processing(original_request)
+                
                 functions_to_call = parsed.get('functions_to_call', [])
                 direct_response = parsed.get('response', '')
                 
                 # If no functions to call, return direct response
                 if not functions_to_call:
+                    self.logger.info("No functions to call, returning direct response")
                     return {
                         "success": True,
                         "type": "direct_response",
-                        "analysis": analysis,
                         "response": direct_response or "I'm not sure how to help with that."
                     }
                 
                 # Execute function calls
+                self.logger.info(f"Executing {len(functions_to_call)} function(s)")
                 results = []
                 for func_call in functions_to_call:
                     func_name = func_call.get('function_name')
                     parameters = func_call.get('parameters', {})
-                    reasoning = func_call.get('reasoning', '')
                     
                     if func_name:
+                        self.logger.info(f"Calling function: {func_name} with parameters: {parameters}")
                         result = await self.function_registry.execute_function(func_name, parameters)
                         results.append({
                             "function": func_name,
                             "parameters": parameters,
-                            "reasoning": reasoning,
                             "result": result
                         })
                 
                 return {
                     "success": True,
                     "type": "function_calls",
-                    "analysis": analysis,
                     "function_results": results,
                     "response": self._generate_response_from_results(results, original_request)
                 }
             
             else:
-                # Could not parse JSON, treat as direct response
+                # Could not find JSON, treat as direct response
+                self.logger.warning("No JSON found in LLM response, treating as direct response")
                 return {
                     "success": True,
                     "type": "direct_response",
-                    "response": llm_response.strip()
+                    "response": llm_response or "I'm not sure how to help with that."
                 }
                 
-        except json.JSONDecodeError as e:
-            self.logger.warning(f"Could not parse LLM JSON response: {e}")
-            return await self._fallback_processing(original_request)
         except Exception as e:
             self.logger.error(f"Error parsing LLM response: {e}")
             return await self._fallback_processing(original_request)
