@@ -567,7 +567,7 @@ class SAGEApplication:
                 calendar_module = self.plugin_manager.get_module('calendar')
                 if calendar_module:
                     print("📅 Processing calendar command...")
-                    result = await calendar_module.process_voice_command(command_text)
+                    result = await calendar_module.handle_natural_language(command_text)
                     
                     if result.get('success'):
                         response = result.get('response', 'Calendar command processed.')
