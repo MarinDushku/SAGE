@@ -290,18 +290,24 @@ class FunctionCallingProcessor:
             # Create prompt for LLM
             function_catalog = self.function_registry.get_function_catalog()
             
-            # Extremely simple prompt to test LLM capability
+            # Simple but complete prompt with available functions
             prompt = f"""User said: "{user_input}"
 
-Is this asking for TIME? Reply with JSON:
+Available functions:
+- get_current_time (no parameters) - Get current time
+- get_current_date (no parameters) - Get current date  
+- lookup_calendar (date parameter) - Check calendar for date
+- add_calendar_event (title, date, time parameters) - Add new event
 
-If YES - time question:
-{{"functions_to_call": [{{"function_name": "get_current_time", "parameters": {{}}}}]}}
+Choose correct function or give direct response:
 
-If NO - not time:
-{{"functions_to_call": [], "response": "I don't understand"}}
+Examples:
+Time question: {{"functions_to_call": [{{"function_name": "get_current_time", "parameters": {{}}}}]}}
+Calendar check: {{"functions_to_call": [{{"function_name": "lookup_calendar", "parameters": {{"date": "tomorrow"}}}}]}}
+Add meeting: {{"functions_to_call": [{{"function_name": "add_calendar_event", "parameters": {{"title": "Meeting", "date": "tomorrow", "time": "9am"}}}}]}}
+Other: {{"functions_to_call": [], "response": "Your response"}}
 
-Your answer:"""
+Your JSON:"""
 
             # Get LLM response
             if self.nlp_module:
