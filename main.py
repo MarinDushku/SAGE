@@ -501,7 +501,7 @@ class SAGEApplication:
     def _command_needs_confirmation(self, intent: str, command: str) -> bool:
         """Determine if a command needs confirmation before execution"""
         # Commands that modify data or perform actions need confirmation
-        action_intents = ['calendar', 'schedule', 'meeting', 'event', 'appointment']
+        action_intents = ['calendar', 'schedule', 'meeting', 'event', 'appointment', 'modify_meeting', 'check_calendar']
         
         # Simple queries don't need confirmation
         query_intents = ['time', 'clock', 'current_time', 'time_query']
@@ -520,15 +520,15 @@ class SAGEApplication:
         command_lower = command.lower()
         
         # Distinguish between checking calendar vs scheduling
-        if intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment', 'check_calendar']:
-            # Check if this is a query about existing events
-            if any(word in command_lower for word in ['do i have', 'what do i have', 'check', 'what\'s on', 'any meetings', 'any events']):
+        if intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment', 'check_calendar', 'modify_meeting']:
+            # Check if this is a query about existing events (checking what's scheduled)
+            if any(word in command_lower for word in ['do i have', 'what do i have', 'check', 'what\'s on', 'any meetings', 'any events', 'anything in the schedule', 'what\'s scheduled']):
                 return f"Do you want me to check your calendar for upcoming events?"
-            # Check if this is about creating/scheduling something
-            elif any(word in command_lower for word in ['schedule', 'book', 'create', 'add', 'set up']):
+            # Check if this is about creating/scheduling something new
+            elif any(word in command_lower for word in ['schedule', 'book', 'create', 'add', 'set up', 'plan']):
                 return f"Do you want me to schedule that for you?"
             else:
-                return f"Do you want me to check your calendar or schedule something?"
+                return f"Do you want me to check your calendar?"
         else:
             return f"Do you want me to proceed with: {command}?"
     
@@ -562,8 +562,8 @@ class SAGEApplication:
                 print(f"🕐 {response}")
                 return response
             
-            # Calendar commands
-            elif intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment']:
+            # Calendar commands (including checking and scheduling)
+            elif intent in ['calendar', 'schedule', 'meeting', 'event', 'appointment', 'check_calendar', 'modify_meeting']:
                 calendar_module = self.plugin_manager.get_module('calendar')
                 if calendar_module:
                     print("📅 Processing calendar command...")
