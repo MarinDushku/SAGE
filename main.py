@@ -375,6 +375,15 @@ class SAGEApplication:
             from modules.voice.conversation_state import ConversationManager, ConversationState
             self.conversation_manager = ConversationManager(self.logger.get_logger("conversation"))
             
+            # Initialize function calling system
+            from modules.function_calling import FunctionRegistry, FunctionCallingProcessor
+            self.function_registry = FunctionRegistry(self.logger.get_logger("functions"))
+            self.function_processor = FunctionCallingProcessor(
+                self.function_registry, 
+                nlp_module, 
+                self.logger.get_logger("function_calling")
+            )
+            
             # Register state change callbacks
             self.conversation_manager.register_state_callback(
                 ConversationState.SLEEPING, 
@@ -473,30 +482,99 @@ class SAGEApplication:
             print(f"❌ Conversation action error: {e}")
     
     async def _process_command_with_confirmation(self, command: str, original_text: str, confidence: float, voice_module, nlp_module, main_log):
-        """Process a command and request confirmation for actions"""
+        """Process a command using function calling approach"""
         try:
-            # Analyze intent
-            if nlp_module:
-                intent_result = await nlp_module.analyze_intent(command)
-                print(f"🧠 Intent: {intent_result.get('intent', 'unknown')} (confidence: {intent_result.get('confidence', 0):.2f})")
-            else:
-                intent_result = {'intent': 'unknown', 'confidence': 0.0}
+            print(f"🧠 Analyzing request: '{command}'")
             
-            intent = intent_result.get('intent', 'unknown')
+            # Use function calling to process the command
+            function_result = await self.function_processor.process_request(command)
             
-            # Determine if this command needs confirmation
-            if self._command_needs_confirmation(intent, command):
-                confirmation_message = self._generate_confirmation_message(intent, command, intent_result)
-                self.conversation_manager.request_confirmation(command, intent_result, confirmation_message)
-                print(f"❓ {confirmation_message}")
-                await self._speak_and_manage_audio(confirmation_message, voice_module)
+            if function_result.get('success'):
+                response_type = function_result.get('type')
+                
+                if response_type == 'function_calls':
+                    # Functions were called - check if confirmation needed
+                    if self._function_calls_need_confirmation(function_result):
+                        confirmation_message = self._generate_function_confirmation_message(function_result)
+                        self.conversation_manager.request_confirmation(command, function_result, confirmation_message)
+                        print(f"❓ {confirmation_message}")
+                        await self._speak_and_manage_audio(confirmation_message, voice_module)
+                    else:
+                        # Execute directly for simple queries
+                        response = function_result.get('response', 'Command processed.')
+                        print(f"✅ {response}")
+                        await self._speak_and_manage_audio(response, voice_module)
+                        self.conversation_manager.command_completed(success=True)
+                
+                elif response_type in ['direct_response', 'fallback_function', 'fallback_unknown']:
+                    # Direct response - no confirmation needed
+                    response = function_result.get('response', 'I processed your request.')
+                    print(f"💬 {response}")
+                    await self._speak_and_manage_audio(response, voice_module)
+                    self.conversation_manager.command_completed(success=True)
+                
+                else:
+                    # Unknown response type
+                    main_log.warning(f"Unknown function calling response type: {response_type}")
+                    await self._speak_and_manage_audio("I'm not sure how to help with that.", voice_module)
+                    self.conversation_manager.command_completed(success=False)
+            
             else:
-                # Execute directly for simple queries
-                await self._execute_confirmed_command(command, intent_result, voice_module, nlp_module, main_log)
+                # Function calling failed
+                error_msg = function_result.get('error', 'Unknown error')
+                fallback_response = function_result.get('fallback_response', 'Sorry, I had trouble processing that.')
+                main_log.error(f"Function calling failed: {error_msg}")
+                await self._speak_and_manage_audio(fallback_response, voice_module)
+                self.conversation_manager.command_completed(success=False)
                 
         except Exception as e:
-            main_log.error(f"Error processing command with confirmation: {e}")
+            main_log.error(f"Error in function calling command processing: {e}")
             await self._speak_and_manage_audio("Sorry, I had trouble processing that command.", voice_module)
+            self.conversation_manager.command_completed(success=False)
+    
+    def _function_calls_need_confirmation(self, function_result: dict) -> bool:
+        """Determine if function calls need confirmation before execution"""
+        # Check what functions were called
+        function_results = function_result.get('function_results', [])
+        
+        for result in function_results:
+            func_name = result.get('function', '')
+            
+            # Functions that modify data need confirmation
+            if func_name in ['add_calendar_event']:
+                return True
+                
+            # Functions that access external data might need confirmation
+            # (For now, keep lookup functions simple without confirmation)
+            
+        return False
+    
+    def _generate_function_confirmation_message(self, function_result: dict) -> str:
+        """Generate confirmation message for function calls"""
+        function_results = function_result.get('function_results', [])
+        analysis = function_result.get('analysis', '')
+        
+        if not function_results:
+            return "Do you want me to proceed with that?"
+        
+        # Generate specific confirmation based on function type
+        for result in function_results:
+            func_name = result.get('function', '')
+            parameters = result.get('parameters', {})
+            
+            if func_name == 'add_calendar_event':
+                title = parameters.get('title', 'event')
+                date = parameters.get('date', 'specified date')
+                time = parameters.get('time', '')
+                
+                message = f"Do you want me to schedule '{title}' for {date}"
+                if time:
+                    message += f" at {time}"
+                message += "?"
+                return message
+        
+        # Generic confirmation
+        return f"Do you want me to {analysis.lower()}?"
     
     def _command_needs_confirmation(self, intent: str, command: str) -> bool:
         """Determine if a command needs confirmation before execution"""
@@ -535,8 +613,13 @@ class SAGEApplication:
     async def _execute_confirmed_command(self, command: str, command_data: dict, voice_module, nlp_module, main_log):
         """Execute a confirmed command with proper audio management"""
         try:
-            # Get the response from command processing without speaking
-            response = await self._get_command_response(command, command_data, nlp_module, main_log)
+            # Check if this is function calling data or old intent data
+            if 'function_results' in command_data:
+                # This is a function calling result - execute the actual functions
+                response = await self._execute_function_calls(command_data, main_log)
+            else:
+                # Fallback to old system if needed
+                response = await self._get_command_response(command, command_data, nlp_module, main_log)
             
             if response:
                 # Speak the response using proper audio management
@@ -548,6 +631,36 @@ class SAGEApplication:
             main_log.error(f"Error executing confirmed command: {e}")
             await self._speak_and_manage_audio("Sorry, I had trouble executing that command.", voice_module)
             self.conversation_manager.command_completed(success=False)
+    
+    async def _execute_function_calls(self, function_result: dict, main_log) -> str:
+        """Execute the actual function calls from confirmed command"""
+        try:
+            function_results = function_result.get('function_results', [])
+            
+            if not function_results:
+                return "No functions to execute."
+            
+            responses = []
+            for result in function_results:
+                func_name = result.get('function', '')
+                parameters = result.get('parameters', {})
+                
+                # Re-execute the function (the previous execution was just for planning)
+                execution_result = await self.function_registry.execute_function(func_name, parameters)
+                
+                if execution_result['success']:
+                    responses.append(str(execution_result['result']))
+                    main_log.info(f"Successfully executed {func_name} with {parameters}")
+                else:
+                    error_msg = execution_result.get('error', 'Unknown error')
+                    responses.append(f"Error executing {func_name}: {error_msg}")
+                    main_log.error(f"Failed to execute {func_name}: {error_msg}")
+            
+            return " ".join(responses) if responses else "Command executed."
+            
+        except Exception as e:
+            main_log.error(f"Error in function execution: {e}")
+            return f"Error executing functions: {str(e)}"
     
     async def _get_command_response(self, command_text: str, intent_result: dict, nlp_module, main_log) -> str:
         """Get response for a command without speaking it"""
