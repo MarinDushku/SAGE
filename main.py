@@ -377,6 +377,7 @@ class SAGEApplication:
             
             # Initialize function calling system
             from modules.function_calling import FunctionRegistry, FunctionCallingProcessor
+            calendar_module = self.plugin_manager.get_module('calendar')
             self.function_registry = FunctionRegistry(
                 self.logger.get_logger("functions"),
                 calendar_module  # Pass calendar module for real integration
