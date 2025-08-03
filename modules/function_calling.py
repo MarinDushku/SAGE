@@ -221,36 +221,51 @@ class FunctionRegistry:
             date_str = target_date.strftime("%Y-%m-%d")
             
             if self.calendar_module:
-                # Use real calendar module
+                # Use direct database operations to bypass calendar module issues
                 start_time = target_date.timestamp()
                 end_time = (target_date + timedelta(days=1)).timestamp()
                 
                 self.logger.info(f"Looking up events from {start_time} to {end_time}")
                 try:
-                    # Add timeout to prevent hanging
-                    import asyncio
-                    events = await asyncio.wait_for(
-                        self.calendar_module._get_events_in_range(start_time, end_time),
-                        timeout=5.0  # 5 second timeout
-                    )
-                    self.logger.info(f"Found {len(events)} events")
-                except asyncio.TimeoutError:
-                    self.logger.error("Calendar lookup timed out after 5 seconds")
-                    return f"Timeout looking up calendar for {date_str}"
-                except Exception as e:
-                    self.logger.error(f"Exception in _get_events_in_range: {e}")
-                    return f"Error looking up calendar: {str(e)}"
-                
-                if events:
-                    event_list = []
-                    for event in events:
-                        event_time = datetime.fromtimestamp(event['start_time']).strftime("%I:%M %p")
-                        event_list.append(f"• {event['title']} at {event_time}")
+                    # Direct SQLite database query
+                    import sqlite3
+                    from pathlib import Path
                     
-                    events_text = "\n".join(event_list)
-                    return f"Events for {date_str}:\n{events_text}"
-                else:
-                    return f"No events found for {date_str}"
+                    # Get database path
+                    db_path = Path("data/calendar.db")
+                    
+                    if not db_path.exists():
+                        return f"No events found for {date_str}"
+                    
+                    # Query events directly from database
+                    with sqlite3.connect(str(db_path)) as conn:
+                        cursor = conn.cursor()
+                        
+                        cursor.execute("""
+                            SELECT * FROM events 
+                            WHERE start_time >= ? AND start_time <= ?
+                            ORDER BY start_time
+                        """, (start_time, end_time))
+                        
+                        columns = [description[0] for description in cursor.description]
+                        events = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                    
+                    self.logger.info(f"Found {len(events)} events")
+                    
+                    if events:
+                        event_list = []
+                        for event in events:
+                            event_time = datetime.fromtimestamp(event['start_time']).strftime("%I:%M %p")
+                            event_list.append(f"• {event['title']} at {event_time}")
+                        
+                        events_text = "\n".join(event_list)
+                        return f"Events for {date_str}:\n{events_text}"
+                    else:
+                        return f"No events found for {date_str}"
+                        
+                except Exception as e:
+                    self.logger.error(f"Exception in direct database lookup: {e}")
+                    return f"Error looking up calendar: {str(e)}"
             else:
                 # Fallback if no calendar module
                 return f"Checking calendar for {date_str}: No events found"
@@ -294,45 +309,66 @@ class FunctionRegistry:
                 event_datetime = target_date.replace(hour=9, minute=0, second=0, microsecond=0)
             
             if self.calendar_module:
-                # Use real calendar module
+                # Use direct database operations to bypass calendar module issues
                 start_time = event_datetime.timestamp()
                 end_time = (event_datetime + timedelta(hours=1)).timestamp()  # Default 1 hour duration
                 
-                # Import CalendarEvent class
-                from modules.calendar.calendar_module import CalendarEvent
-                import uuid
-                
-                # Create CalendarEvent object
-                calendar_event = CalendarEvent(
-                    event_id=str(uuid.uuid4()),
-                    title=title,
-                    description="",
-                    start_time=start_time,
-                    end_time=end_time,
-                    location=location or ""
-                )
-                
-                # Add event using calendar module
                 self.logger.info(f"Attempting to add event to calendar: {title}")
                 try:
-                    # Add timeout to prevent hanging
-                    import asyncio
-                    success = await asyncio.wait_for(
-                        self.calendar_module.add_event(calendar_event), 
-                        timeout=10.0  # 10 second timeout
-                    )
-                    self.logger.info(f"Calendar add_event returned: {success}")
+                    # Direct SQLite database insertion
+                    import sqlite3
+                    import uuid
+                    from pathlib import Path
                     
-                    if success:
-                        formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
-                        return f"Successfully scheduled: {title} on {formatted_time}"
-                    else:
-                        return f"Failed to schedule event: {title}"
-                except asyncio.TimeoutError:
-                    self.logger.error("Calendar add_event timed out after 10 seconds")
-                    return f"Timeout scheduling event: {title}"
+                    # Get database path
+                    db_path = Path("data/calendar.db")
+                    
+                    # Create database if it doesn't exist
+                    if not db_path.exists():
+                        db_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    # Insert event directly into database
+                    with sqlite3.connect(str(db_path)) as conn:
+                        cursor = conn.cursor()
+                        
+                        # Create events table if it doesn't exist
+                        cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS events (
+                                event_id TEXT PRIMARY KEY,
+                                title TEXT NOT NULL,
+                                description TEXT,
+                                location TEXT,
+                                start_time REAL NOT NULL,
+                                end_time REAL NOT NULL,
+                                all_day INTEGER DEFAULT 0,
+                                reminder_minutes INTEGER DEFAULT 15,
+                                recurring TEXT DEFAULT 'none',
+                                recurring_until REAL,
+                                created_at REAL,
+                                updated_at REAL,
+                                tags TEXT
+                            )
+                        """)
+                        
+                        # Insert the event
+                        event_id = str(uuid.uuid4())
+                        cursor.execute("""
+                            INSERT INTO events 
+                            (event_id, title, description, location, start_time, end_time, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            event_id, title, "", location or "", 
+                            start_time, end_time, start_time, start_time
+                        ))
+                        
+                        conn.commit()
+                    
+                    formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
+                    self.logger.info(f"Successfully added event to database: {title}")
+                    return f"Successfully scheduled: {title} on {formatted_time}"
+                    
                 except Exception as e:
-                    self.logger.error(f"Exception in add_event: {e}")
+                    self.logger.error(f"Exception in direct database add: {e}")
                     return f"Error scheduling event: {str(e)}"
             else:
                 # Fallback if no calendar module
