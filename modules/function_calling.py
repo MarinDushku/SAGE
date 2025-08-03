@@ -315,20 +315,26 @@ OR
 
 JSON RESPONSE:"""
 
-            # Get LLM response
+            # Try LLM first but expect it to fail, so fallback quickly
             if self.nlp_module:
-                self.logger.info(f"Sending prompt to LLM: {prompt[:200]}...")
-                llm_result = await self.nlp_module.process_text(prompt)
-                if llm_result.get('success'):
-                    response_text = llm_result['response']['text']
-                    self.logger.info(f"LLM raw response: {response_text}")
-                    return await self._parse_llm_response(response_text, user_input)
-                else:
-                    self.logger.warning(f"LLM processing failed: {llm_result}")
-            else:
-                self.logger.warning("No NLP module available for function calling")
+                self.logger.info("Attempting LLM processing...")
+                try:
+                    llm_result = await self.nlp_module.process_text(prompt)
+                    if llm_result.get('success'):
+                        response_text = llm_result['response']['text']
+                        self.logger.info(f"LLM response: {response_text[:100]}...")
+                        
+                        # Try to parse LLM response, but fallback quickly if it fails
+                        llm_result = await self._parse_llm_response(response_text, user_input)
+                        if llm_result.get('type') != 'direct_response' or 'template' not in str(llm_result):
+                            return llm_result
+                        else:
+                            self.logger.info("LLM gave poor response, using fallback")
+                except Exception as e:
+                    self.logger.info(f"LLM processing failed: {e}")
             
-            # Fallback if NLP module not available
+            # Use enhanced fallback as primary system
+            self.logger.info("Using enhanced fallback processing")
             return await self._fallback_processing(user_input)
             
         except Exception as e:
@@ -370,7 +376,8 @@ JSON RESPONSE:"""
                 self.logger.info(f"Attempting to parse first JSON: {first_json}")
                 
                 # Reject template responses
-                if "FUNCTION_NAME" in first_json or "your response" in first_json.lower():
+                template_indicators = ["FUNCTION_NAME", "function_name", "your response", "direct answer"]
+                if any(indicator in first_json.lower() for indicator in [ind.lower() for ind in template_indicators]):
                     self.logger.warning("LLM returned template, using fallback")
                     return await self._fallback_processing(original_request)
                 
