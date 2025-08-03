@@ -290,36 +290,18 @@ class FunctionCallingProcessor:
             # Create prompt for LLM
             function_catalog = self.function_registry.get_function_catalog()
             
-            # Clear, direct prompt with single example
-            prompt = f"""You are a function calling assistant. Available functions:
+            # Extremely simple prompt to test LLM capability
+            prompt = f"""User said: "{user_input}"
 
-{function_catalog}
+Is this asking for TIME? Reply with JSON:
 
-User request: "{user_input}"
+If YES - time question:
+{{"functions_to_call": [{{"function_name": "get_current_time", "parameters": {{}}}}]}}
 
-Rules:
-- Time questions → call get_current_time
-- Date questions → call get_current_date  
-- Calendar/schedule questions → call lookup_calendar with date parameter
-- Other questions → provide direct response
+If NO - not time:
+{{"functions_to_call": [], "response": "I don't understand"}}
 
-Response format (JSON only):
-{{
-    "functions_to_call": [
-        {{
-            "function_name": "function_name_here",
-            "parameters": {{"param": "value"}}
-        }}
-    ]
-}}
-
-OR for direct responses:
-{{
-    "functions_to_call": [],
-    "response": "your answer here"
-}}
-
-Your JSON response:"""
+Your answer:"""
 
             # Get LLM response
             if self.nlp_module:
@@ -452,11 +434,14 @@ Your JSON response:"""
         return " ".join(responses)
     
     async def _fallback_processing(self, user_input: str) -> Dict[str, Any]:
-        """Fallback processing when LLM parsing fails"""
-        # Simple keyword-based fallback
+        """Enhanced fallback processing when LLM parsing fails"""
+        self.logger.info(f"Using fallback processing for: '{user_input}'")
         user_lower = user_input.lower()
         
-        if any(word in user_lower for word in ['time', 'what time', 'clock']):
+        # Time queries - multiple variations
+        time_keywords = ['time', 'what time', 'clock', 'hour', 'minute', 'when is it', 'current time']
+        if any(word in user_lower for word in time_keywords):
+            self.logger.info("Fallback detected time query")
             result = await self.function_registry.execute_function("get_current_time", {})
             if result['success']:
                 return {
@@ -465,7 +450,10 @@ Your JSON response:"""
                     "response": f"It's currently {result['result']}"
                 }
         
-        elif any(word in user_lower for word in ['date', 'what date', 'today']):
+        # Date queries
+        date_keywords = ['date', 'what date', 'today', 'current date', 'what day']
+        if any(word in user_lower for word in date_keywords):
+            self.logger.info("Fallback detected date query")
             result = await self.function_registry.execute_function("get_current_date", {})
             if result['success']:
                 return {
@@ -474,6 +462,26 @@ Your JSON response:"""
                     "response": f"Today is {result['result']}"
                 }
         
+        # Calendar queries
+        calendar_keywords = ['schedule', 'calendar', 'meetings', 'events', 'appointments', 'planned', 'busy']
+        if any(word in user_lower for word in calendar_keywords):
+            self.logger.info("Fallback detected calendar query")
+            # Extract date if possible
+            date_param = "today"  # default
+            if "tomorrow" in user_lower:
+                date_param = "tomorrow"
+            elif "yesterday" in user_lower:
+                date_param = "yesterday"
+                
+            result = await self.function_registry.execute_function("lookup_calendar", {"date": date_param})
+            if result['success']:
+                return {
+                    "success": True,
+                    "type": "fallback_function",
+                    "response": str(result['result'])
+                }
+        
+        self.logger.info("Fallback could not classify request")
         return {
             "success": True,
             "type": "fallback_unknown",
