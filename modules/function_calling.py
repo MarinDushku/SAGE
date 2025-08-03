@@ -486,10 +486,73 @@ JSON RESPONSE:"""
                     "response": f"Today is {result['result']}"
                 }
         
-        # Calendar queries
-        calendar_keywords = ['schedule', 'calendar', 'meetings', 'events', 'appointments', 'planned', 'busy']
-        if any(word in user_lower for word in calendar_keywords):
-            self.logger.info("Fallback detected calendar query")
+        # Scheduling/Adding events - these come BEFORE calendar lookup
+        add_keywords = ['schedule', 'add', 'create', 'book', 'set up', 'plan', 'arrange']
+        action_phrases = [
+            'schedule a', 'schedule an', 'add a', 'add an', 'create a', 'book a', 
+            'set up a', 'plan a', 'arrange a', 'schedule meeting', 'add meeting'
+        ]
+        
+        # Check for scheduling/adding requests first
+        if (any(word in user_lower for word in add_keywords) and 
+            any(phrase in user_lower for phrase in action_phrases + ['meeting', 'event', 'appointment'])):
+            
+            self.logger.info("Fallback detected scheduling request")
+            
+            # Extract parameters
+            title = "Meeting"  # default
+            date_param = "today"  # default
+            time_param = None
+            
+            if "tomorrow" in user_lower:
+                date_param = "tomorrow"
+            elif "today" in user_lower:
+                date_param = "today"
+                
+            # Extract time if mentioned
+            import re
+            time_patterns = [
+                r'(\d{1,2})\s*(am|pm)',
+                r'(\d{1,2}):(\d{2})\s*(am|pm)', 
+                r'(\d{1,2})\s*o\'?clock',
+                r'at\s+(\d{1,2})',
+                r'(\d{1,2})\s*a\.?m\.?',
+                r'(\d{1,2})\s*p\.?m\.?'
+            ]
+            
+            for pattern in time_patterns:
+                match = re.search(pattern, user_lower)
+                if match:
+                    time_param = match.group(0)
+                    break
+                    
+            # Try to extract meeting title
+            if "meeting" in user_lower:
+                title = "Meeting"
+            elif "appointment" in user_lower:
+                title = "Appointment"
+                
+            result = await self.function_registry.execute_function("add_calendar_event", {
+                "title": title,
+                "date": date_param,
+                "time": time_param
+            })
+            
+            if result['success']:
+                return {
+                    "success": True,
+                    "type": "fallback_function", 
+                    "response": str(result['result'])
+                }
+        
+        # Calendar LOOKUP queries (checking what's scheduled) - AFTER scheduling
+        lookup_keywords = ['what', 'check', 'show', 'view', 'see', 'tell me']
+        calendar_objects = ['calendar', 'meetings', 'events', 'appointments', 'planned', 'busy']
+        
+        if (any(word in user_lower for word in lookup_keywords) and 
+            any(word in user_lower for word in calendar_objects)):
+            
+            self.logger.info("Fallback detected calendar lookup query")
             # Extract date if possible
             date_param = "today"  # default
             if "tomorrow" in user_lower:
