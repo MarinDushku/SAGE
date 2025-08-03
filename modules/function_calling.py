@@ -546,12 +546,24 @@ JSON RESPONSE:"""
                 }
         
         # Calendar LOOKUP queries (checking what's scheduled) - AFTER scheduling
-        lookup_keywords = ['what', 'check', 'show', 'view', 'see', 'tell me']
-        calendar_objects = ['calendar', 'meetings', 'events', 'appointments', 'planned', 'busy']
+        # More flexible lookup patterns
+        lookup_patterns = [
+            # Question patterns
+            'do i have', 'what', 'check', 'show', 'view', 'see', 'tell me',
+            'any meetings', 'any events', 'any appointments',
+            'anything on', 'anything in', 'whats on', "what's on",
+            'free on', 'busy on', 'available on'
+        ]
+        calendar_objects = ['schedule', 'calendar', 'meetings', 'events', 'appointments', 'planned', 'busy']
         
-        if (any(word in user_lower for word in lookup_keywords) and 
-            any(word in user_lower for word in calendar_objects)):
-            
+        # Check for lookup patterns OR calendar objects with question words
+        is_lookup_query = (
+            any(pattern in user_lower for pattern in lookup_patterns) or
+            (any(word in user_lower for word in calendar_objects) and 
+             any(q_word in user_lower for q_word in ['do', 'what', 'when', '?']))
+        )
+        
+        if is_lookup_query:
             self.logger.info("Fallback detected calendar lookup query")
             # Extract date if possible
             date_param = "today"  # default
