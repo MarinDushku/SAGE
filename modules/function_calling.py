@@ -93,6 +93,62 @@ class FunctionRegistry:
             handler=self._add_calendar_event
         )
         
+        self.register_function(
+            "remove_calendar_event",
+            description="Remove an event from the calendar",
+            parameters={
+                "date": {
+                    "type": "string",
+                    "description": "Event date (YYYY-MM-DD or relative like 'tomorrow')",
+                    "required": True
+                },
+                "time": {
+                    "type": "string",
+                    "description": "Event time (HH:MM format or relative like '9am')",
+                    "required": False
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Event title/name to identify which event to remove",
+                    "required": False
+                }
+            },
+            handler=self._remove_calendar_event
+        )
+        
+        self.register_function(
+            "move_calendar_event",
+            description="Move an existing event to a different time/date",
+            parameters={
+                "from_date": {
+                    "type": "string",
+                    "description": "Current event date (YYYY-MM-DD or relative like 'tomorrow')",
+                    "required": True
+                },
+                "from_time": {
+                    "type": "string",
+                    "description": "Current event time (HH:MM format or relative like '9am')",
+                    "required": False
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "New event date (YYYY-MM-DD or relative like 'tomorrow')",
+                    "required": False
+                },
+                "to_time": {
+                    "type": "string",
+                    "description": "New event time (HH:MM format or relative like '10am')",
+                    "required": True
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Event title/name to identify which event to move",
+                    "required": False
+                }
+            },
+            handler=self._move_calendar_event
+        )
+        
         # System functions
         self.register_function(
             "get_system_status",
@@ -333,7 +389,7 @@ class FunctionRegistry:
                     if not db_path.exists():
                         db_path.parent.mkdir(parents=True, exist_ok=True)
                     
-                    # Insert event directly into database
+                    # Check for conflicts first
                     with sqlite3.connect(str(db_path)) as conn:
                         cursor = conn.cursor()
                         
@@ -356,7 +412,33 @@ class FunctionRegistry:
                             )
                         """)
                         
-                        # Insert the event
+                        # Check for conflicts (events that overlap with the proposed time)
+                        cursor.execute("""
+                            SELECT title, start_time, end_time FROM events 
+                            WHERE (start_time < ? AND end_time > ?) OR (start_time < ? AND end_time > ?)
+                            ORDER BY start_time
+                        """, (end_time, start_time, start_time, end_time))
+                        
+                        conflicts = cursor.fetchall()
+                        
+                        if conflicts:
+                            # Time slot is taken - find next available slot
+                            conflict_titles = [conflict[0] for conflict in conflicts]
+                            conflict_times = [datetime.fromtimestamp(conflict[1]).strftime("%I:%M %p") for conflict in conflicts]
+                            
+                            # Find next available hour
+                            next_available = await self._find_next_available_hour(event_datetime, cursor)
+                            
+                            conflict_message = f"Time slot conflict! You already have: {', '.join(conflict_titles)} at {', '.join(conflict_times)}. "
+                            if next_available:
+                                next_time_str = next_available.strftime("%I:%M %p")
+                                conflict_message += f"How about {next_time_str} instead?"
+                            else:
+                                conflict_message += "No free slots found in the next few hours."
+                            
+                            return conflict_message
+                        
+                        # No conflicts - proceed with insertion
                         event_id = str(uuid.uuid4())
                         cursor.execute("""
                             INSERT INTO events 
@@ -391,6 +473,262 @@ class FunctionRegistry:
         """Get system status"""
         # This would interface with the resource monitor
         return "System status: All modules running normally"
+    
+    async def _find_next_available_hour(self, preferred_datetime: datetime, cursor) -> Optional[datetime]:
+        """Find the next available hour slot starting from preferred time"""
+        try:
+            # Check the next 8 hours for availability
+            current_check = preferred_datetime
+            
+            for hour_offset in range(1, 9):  # Check next 8 hours
+                check_time = current_check + timedelta(hours=hour_offset)
+                check_start = check_time.timestamp()
+                check_end = (check_time + timedelta(hours=1)).timestamp()
+                
+                # Check if this hour slot is free
+                cursor.execute("""
+                    SELECT COUNT(*) FROM events 
+                    WHERE (start_time < ? AND end_time > ?) OR (start_time < ? AND end_time > ?)
+                """, (check_end, check_start, check_start, check_end))
+                
+                conflict_count = cursor.fetchone()[0]
+                
+                if conflict_count == 0:
+                    return check_time
+            
+            return None  # No free slots found
+            
+        except Exception as e:
+            self.logger.error(f"Error finding next available hour: {e}")
+            return None
+    
+    async def _remove_calendar_event(self, date: str, time: Optional[str] = None, title: Optional[str] = None) -> str:
+        """Remove calendar event"""
+        try:
+            # Parse date
+            target_date = self._parse_relative_date(date)
+            date_str = target_date.strftime("%Y-%m-%d")
+            
+            import sqlite3
+            from pathlib import Path
+            
+            # Get database path
+            db_path = Path("data/calendar.db")
+            
+            if not db_path.exists():
+                return f"No events found for {date_str}"
+            
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.cursor()
+                
+                # Build query based on provided parameters
+                if time:
+                    # Parse time to get hour/minute
+                    import re
+                    time_clean = time.lower().strip()
+                    hour = 9  # default
+                    minute = 0  # default
+                    
+                    time_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?', time_clean)
+                    if time_match:
+                        hour = int(time_match.group(1))
+                        if time_match.group(2):
+                            minute = int(time_match.group(2))
+                        if time_match.group(3) and 'p' in time_match.group(3) and hour != 12:
+                            hour += 12
+                        elif time_match.group(3) and 'a' in time_match.group(3) and hour == 12:
+                            hour = 0
+                    
+                    target_datetime = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    target_timestamp = target_datetime.timestamp()
+                    
+                    # Find events around this time (within 30 minutes)
+                    start_window = target_timestamp - 1800  # 30 minutes before
+                    end_window = target_timestamp + 1800    # 30 minutes after
+                    
+                    if title:
+                        cursor.execute("""
+                            SELECT event_id, title, start_time FROM events 
+                            WHERE start_time >= ? AND start_time <= ? AND title LIKE ?
+                        """, (start_window, end_window, f"%{title}%"))
+                    else:
+                        cursor.execute("""
+                            SELECT event_id, title, start_time FROM events 
+                            WHERE start_time >= ? AND start_time <= ?
+                        """, (start_window, end_window))
+                else:
+                    # No specific time - find events on this date
+                    start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    
+                    start_timestamp = start_of_day.timestamp()
+                    end_timestamp = end_of_day.timestamp()
+                    
+                    if title:
+                        cursor.execute("""
+                            SELECT event_id, title, start_time FROM events 
+                            WHERE start_time >= ? AND start_time <= ? AND title LIKE ?
+                        """, (start_timestamp, end_timestamp, f"%{title}%"))
+                    else:
+                        cursor.execute("""
+                            SELECT event_id, title, start_time FROM events 
+                            WHERE start_time >= ? AND start_time <= ?
+                        """, (start_timestamp, end_timestamp))
+                
+                events_to_remove = cursor.fetchall()
+                
+                if not events_to_remove:
+                    return f"No matching events found for {date_str}"
+                
+                if len(events_to_remove) == 1:
+                    # Remove the single matching event
+                    event_id, event_title, event_time = events_to_remove[0]
+                    cursor.execute("DELETE FROM events WHERE event_id = ?", (event_id,))
+                    conn.commit()
+                    
+                    event_time_str = datetime.fromtimestamp(event_time).strftime("%I:%M %p")
+                    return f"Removed '{event_title}' from {date_str} at {event_time_str}"
+                
+                else:
+                    # Multiple events found - list them
+                    event_list = []
+                    for _, event_title, event_time in events_to_remove:
+                        event_time_str = datetime.fromtimestamp(event_time).strftime("%I:%M %p")
+                        event_list.append(f"• {event_title} at {event_time_str}")
+                    
+                    return f"Multiple events found for {date_str}. Please be more specific:\n" + "\n".join(event_list)
+                    
+        except Exception as e:
+            self.logger.error(f"Error removing calendar event: {e}")
+            return f"Error removing event: {str(e)}"
+    
+    async def _move_calendar_event(self, from_date: str, to_time: str, from_time: Optional[str] = None, 
+                                 to_date: Optional[str] = None, title: Optional[str] = None) -> str:
+        """Move calendar event to a different time/date"""
+        try:
+            # Parse dates
+            from_target_date = self._parse_relative_date(from_date)
+            to_target_date = self._parse_relative_date(to_date) if to_date else from_target_date
+            
+            import sqlite3
+            import re
+            from pathlib import Path
+            
+            # Get database path
+            db_path = Path("data/calendar.db")
+            
+            if not db_path.exists():
+                return f"No events found to move"
+            
+            # Parse times
+            from_hour, from_minute = 9, 0  # defaults
+            to_hour, to_minute = 9, 0  # defaults
+            
+            if from_time:
+                time_clean = from_time.lower().strip()
+                time_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?', time_clean)
+                if time_match:
+                    from_hour = int(time_match.group(1))
+                    if time_match.group(2):
+                        from_minute = int(time_match.group(2))
+                    if time_match.group(3) and 'p' in time_match.group(3) and from_hour != 12:
+                        from_hour += 12
+                    elif time_match.group(3) and 'a' in time_match.group(3) and from_hour == 12:
+                        from_hour = 0
+            
+            # Parse to_time
+            time_clean = to_time.lower().strip()
+            time_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?', time_clean)
+            if time_match:
+                to_hour = int(time_match.group(1))
+                if time_match.group(2):
+                    to_minute = int(time_match.group(2))
+                if time_match.group(3) and 'p' in time_match.group(3) and to_hour != 12:
+                    to_hour += 12
+                elif time_match.group(3) and 'a' in time_match.group(3) and to_hour == 12:
+                    to_hour = 0
+            
+            from_datetime = from_target_date.replace(hour=from_hour, minute=from_minute, second=0, microsecond=0)
+            to_datetime = to_target_date.replace(hour=to_hour, minute=to_minute, second=0, microsecond=0)
+            
+            with sqlite3.connect(str(db_path)) as conn:
+                cursor = conn.cursor()
+                
+                # Find the event to move
+                from_timestamp = from_datetime.timestamp()
+                start_window = from_timestamp - 1800  # 30 minutes before
+                end_window = from_timestamp + 1800    # 30 minutes after
+                
+                if title:
+                    cursor.execute("""
+                        SELECT event_id, title, start_time, end_time FROM events 
+                        WHERE start_time >= ? AND start_time <= ? AND title LIKE ?
+                    """, (start_window, end_window, f"%{title}%"))
+                else:
+                    cursor.execute("""
+                        SELECT event_id, title, start_time, end_time FROM events 
+                        WHERE start_time >= ? AND start_time <= ?
+                    """, (start_window, end_window))
+                
+                events_to_move = cursor.fetchall()
+                
+                if not events_to_move:
+                    from_date_str = from_target_date.strftime("%Y-%m-%d")
+                    from_time_str = from_datetime.strftime("%I:%M %p")
+                    return f"No events found at {from_date_str} {from_time_str}"
+                
+                if len(events_to_move) > 1:
+                    # Multiple events found - list them
+                    event_list = []
+                    for _, event_title, event_time, _ in events_to_move:
+                        event_time_str = datetime.fromtimestamp(event_time).strftime("%I:%M %p")
+                        event_list.append(f"• {event_title} at {event_time_str}")
+                    
+                    return f"Multiple events found. Please be more specific:\n" + "\n".join(event_list)
+                
+                # Move the single event
+                event_id, event_title, old_start_time, old_end_time = events_to_move[0]
+                duration = old_end_time - old_start_time  # preserve duration
+                
+                new_start_time = to_datetime.timestamp()
+                new_end_time = new_start_time + duration
+                
+                # Check for conflicts at the new time
+                cursor.execute("""
+                    SELECT title, start_time FROM events 
+                    WHERE event_id != ? AND ((start_time < ? AND end_time > ?) OR (start_time < ? AND end_time > ?))
+                """, (event_id, new_end_time, new_start_time, new_start_time, new_end_time))
+                
+                conflicts = cursor.fetchall()
+                
+                if conflicts:
+                    conflict_titles = [conflict[0] for conflict in conflicts]
+                    conflict_times = [datetime.fromtimestamp(conflict[1]).strftime("%I:%M %p") for conflict in conflicts]
+                    to_time_str = to_datetime.strftime("%I:%M %p")
+                    return f"Cannot move to {to_time_str} - conflict with: {', '.join(conflict_titles)} at {', '.join(conflict_times)}"
+                
+                # No conflicts - proceed with move
+                cursor.execute("""
+                    UPDATE events 
+                    SET start_time = ?, end_time = ?, updated_at = ?
+                    WHERE event_id = ?
+                """, (new_start_time, new_end_time, new_start_time, event_id))
+                
+                conn.commit()
+                
+                old_time_str = datetime.fromtimestamp(old_start_time).strftime("%I:%M %p")
+                new_time_str = to_datetime.strftime("%I:%M %p")
+                old_date_str = from_target_date.strftime("%Y-%m-%d")
+                new_date_str = to_target_date.strftime("%Y-%m-%d")
+                
+                if old_date_str == new_date_str:
+                    return f"Moved '{event_title}' from {old_time_str} to {new_time_str} on {new_date_str}"
+                else:
+                    return f"Moved '{event_title}' from {old_date_str} {old_time_str} to {new_date_str} {new_time_str}"
+                    
+        except Exception as e:
+            self.logger.error(f"Error moving calendar event: {e}")
+            return f"Error moving event: {str(e)}"
     
     def _parse_relative_date(self, date_str: str) -> datetime:
         """Parse relative date strings like 'today', 'tomorrow'"""
@@ -672,6 +1010,151 @@ JSON RESPONSE:"""
                 "title": title,
                 "date": date_param,
                 "time": time_param
+            })
+            
+            if result['success']:
+                return {
+                    "success": True,
+                    "type": "fallback_function", 
+                    "response": str(result['result'])
+                }
+        
+        # Remove/Delete events - check before lookup
+        remove_keywords = ['remove', 'delete', 'cancel', 'clear']
+        remove_phrases = [
+            'remove the', 'delete the', 'cancel the', 'clear the',
+            'remove my', 'delete my', 'cancel my', 'clear my'
+        ]
+        
+        if (any(word in user_lower for word in remove_keywords) and 
+            any(phrase in user_lower for phrase in remove_phrases + ['meeting', 'event', 'appointment'])):
+            
+            self.logger.info("Fallback detected remove request")
+            
+            # Extract parameters
+            date_param = "today"  # default
+            time_param = None
+            title_param = None
+            
+            if "tomorrow" in user_lower:
+                date_param = "tomorrow"
+            elif "today" in user_lower:
+                date_param = "today"
+            elif "yesterday" in user_lower:
+                date_param = "yesterday"
+                
+            # Extract time if mentioned
+            import re
+            time_patterns = [
+                r'(\d{1,2})\s*(am|pm)',
+                r'(\d{1,2}):(\d{2})\s*(am|pm)', 
+                r'(\d{1,2})\s*o\'?clock',
+                r'at\s+(\d{1,2})',
+                r'(\d{1,2})\s*a\.?m\.?',
+                r'(\d{1,2})\s*p\.?m\.?'
+            ]
+            
+            for pattern in time_patterns:
+                match = re.search(pattern, user_lower)
+                if match:
+                    time_param = match.group(0)
+                    break
+            
+            # Try to extract title hints
+            if "meeting" in user_lower:
+                title_param = "meeting"
+            elif "appointment" in user_lower:
+                title_param = "appointment"
+                
+            result = await self.function_registry.execute_function("remove_calendar_event", {
+                "date": date_param,
+                "time": time_param,
+                "title": title_param
+            })
+            
+            if result['success']:
+                return {
+                    "success": True,
+                    "type": "fallback_function", 
+                    "response": str(result['result'])
+                }
+        
+        # Move/Reschedule events - check before lookup
+        move_keywords = ['move', 'reschedule', 'change', 'shift']
+        move_phrases = [
+            'move my', 'move the', 'reschedule my', 'reschedule the',
+            'change my', 'change the', 'shift my', 'shift the'
+        ]
+        
+        if (any(word in user_lower for word in move_keywords) and 
+            any(phrase in user_lower for phrase in move_phrases + ['meeting', 'event', 'appointment'])):
+            
+            self.logger.info("Fallback detected move request")
+            
+            # Extract parameters
+            from_date_param = "today"  # default
+            from_time_param = None
+            to_time_param = None
+            to_date_param = None
+            title_param = None
+            
+            # Extract dates
+            if "tomorrow" in user_lower:
+                from_date_param = "tomorrow"
+            elif "today" in user_lower:
+                from_date_param = "today"
+                
+            # Extract times - look for "from X to Y" or "X to Y" patterns
+            import re
+            
+            # Look for time patterns
+            time_patterns = [
+                r'(\d{1,2})\s*(am|pm)',
+                r'(\d{1,2}):(\d{2})\s*(am|pm)', 
+                r'(\d{1,2})\s*o\'?clock',
+                r'(\d{1,2})\s*a\.?m\.?',
+                r'(\d{1,2})\s*p\.?m\.?'
+            ]
+            
+            times_found = []
+            for pattern in time_patterns:
+                matches = re.finditer(pattern, user_lower)
+                for match in matches:
+                    times_found.append(match.group(0))
+            
+            if len(times_found) >= 2:
+                # Assume first time is "from" and second is "to"
+                from_time_param = times_found[0]
+                to_time_param = times_found[1]
+            elif len(times_found) == 1:
+                # Look for context clues
+                if " to " in user_lower:
+                    # Likely the "to" time
+                    to_time_param = times_found[0]
+                else:
+                    # Likely the "from" time
+                    from_time_param = times_found[0]
+                    
+            # If we don't have a "to" time, can't proceed
+            if not to_time_param:
+                return {
+                    "success": True,
+                    "type": "fallback_unknown",
+                    "response": "To move an event, please specify both the current time and the new time. For example: 'move my 9am meeting to 10am'"
+                }
+            
+            # Try to extract title hints
+            if "meeting" in user_lower:
+                title_param = "meeting"
+            elif "appointment" in user_lower:
+                title_param = "appointment"
+                
+            result = await self.function_registry.execute_function("move_calendar_event", {
+                "from_date": from_date_param,
+                "from_time": from_time_param,
+                "to_date": to_date_param,
+                "to_time": to_time_param,
+                "title": title_param
             })
             
             if result['success']:
