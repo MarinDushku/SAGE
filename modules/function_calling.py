@@ -889,6 +889,43 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         return await self._fallback_processing(user_input)
     
     
+    def _simple_semantic_detection(self, user_input: str) -> Dict[str, Any]:
+        """Simple word-based semantic detection before trying LLM"""
+        user_lower = user_input.lower()
+        
+        # More flexible scheduling patterns
+        schedule_indicators = [
+            'schedul', 'book', 'add', 'create', 'set up', 'plan', 'arrange',
+            'want to schedule', 'need to schedule', 'can you schedule',
+            'i want', 'i need', 'can u', 'could you'
+        ]
+        
+        meeting_indicators = ['meeting', 'appointment', 'event']
+        time_indicators = ['am', 'pm', 'o\'clock', 'at ', 'for ']
+        
+        # Check if it's likely a scheduling request
+        has_schedule_word = any(word in user_lower for word in schedule_indicators)
+        has_meeting_word = any(word in user_lower for word in meeting_indicators)
+        has_time_reference = any(word in user_lower for word in time_indicators + ['tomorrow', 'today', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
+        
+        if has_schedule_word and (has_meeting_word or has_time_reference):
+            self.logger.info("Simple semantic detection: scheduling request")
+            return "schedule_event"
+        
+        # Check for time queries
+        time_queries = ['time', 'what time', 'current time', 'tell me the time']
+        if any(query in user_lower for query in time_queries):
+            self.logger.info("Simple semantic detection: time query")
+            return "time_query"
+        
+        # Check for calendar lookups
+        calendar_queries = ['do i have', 'what', 'check', 'my schedule', 'my calendar', 'free', 'busy', 'available']
+        if any(query in user_lower for query in calendar_queries):
+            self.logger.info("Simple semantic detection: calendar lookup")
+            return "calendar_lookup"
+        
+        return None
+
     async def _semantic_function_detection(self, user_input: str) -> Dict[str, Any]:
         """Use LLM to understand semantic meaning when keyword matching fails"""
         try:
@@ -1361,11 +1398,29 @@ Answer: A, B, C, D, E, or F"""
         
         self.logger.info("Fallback could not classify request, trying semantic understanding")
         
-        # Second layer: Use LLM for semantic understanding when keywords fail
+        # Second layer: Try simple word detection before LLM
+        simple_semantic_result = self._simple_semantic_detection(user_input)
+        if simple_semantic_result:
+            self.logger.info(f"Simple semantic detected: {simple_semantic_result}")
+            if simple_semantic_result == "schedule_event":
+                return await self._handle_schedule_event(user_input)
+            elif simple_semantic_result == "time_query":
+                return await self._handle_time_query()
+            elif simple_semantic_result == "calendar_lookup":
+                return await self._handle_calendar_lookup(user_input)
+        
+        # Third layer: Use LLM for semantic understanding when everything else fails
         if self.nlp_module:
-            semantic_result = await self._semantic_function_detection(user_input)
-            if semantic_result:
-                return semantic_result
+            try:
+                # Add timeout to prevent hanging
+                semantic_result = await asyncio.wait_for(
+                    self._semantic_function_detection(user_input), 
+                    timeout=5.0
+                )
+                if semantic_result:
+                    return semantic_result
+            except asyncio.TimeoutError:
+                self.logger.warning("Semantic detection timed out")
         
         # Last resort fallback
         self.logger.info("Semantic understanding also failed")
