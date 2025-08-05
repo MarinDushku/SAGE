@@ -829,6 +829,7 @@ OR
 JSON RESPONSE:"""
 
             # Try LLM first but expect it to fail, so fallback quickly
+            llm_response_for_conversation = None
             if self.nlp_module:
                 self.logger.info("Attempting LLM processing...")
                 try:
@@ -836,6 +837,9 @@ JSON RESPONSE:"""
                     if llm_result.get('success'):
                         response_text = llm_result['response']['text']
                         self.logger.info(f"LLM response: {response_text[:100]}...")
+                        
+                        # Store LLM response for potential conversation use
+                        llm_response_for_conversation = response_text
                         
                         # Try to parse LLM response, but fallback quickly if it fails
                         llm_result = await self._parse_llm_response(response_text, user_input)
@@ -848,7 +852,7 @@ JSON RESPONSE:"""
             
             # Use enhanced fallback as primary system
             self.logger.info("Using enhanced fallback processing")
-            return await self._fallback_processing(user_input)
+            return await self._fallback_processing(user_input, llm_response_for_conversation)
             
         except Exception as e:
             self.logger.error(f"Error processing request: {e}")
@@ -970,7 +974,7 @@ JSON RESPONSE:"""
         
         return " ".join(responses)
     
-    async def _fallback_processing(self, user_input: str) -> Dict[str, Any]:
+    async def _fallback_processing(self, user_input: str, llm_response_for_conversation: str = None) -> Dict[str, Any]:
         """Enhanced fallback processing when LLM parsing fails"""
         self.logger.info(f"Using fallback processing for: '{user_input}'")
         user_lower = user_input.lower()
@@ -1244,6 +1248,17 @@ JSON RESPONSE:"""
                 }
         
         self.logger.info("Fallback could not classify request")
+        
+        # If we have an LLM response for general conversation, use it
+        if llm_response_for_conversation:
+            self.logger.info("Using LLM response for general conversation")
+            return {
+                "success": True,
+                "type": "llm_conversation",
+                "response": llm_response_for_conversation.strip()
+            }
+        
+        # Last resort fallback
         return {
             "success": True,
             "type": "fallback_unknown",
