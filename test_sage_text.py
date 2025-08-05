@@ -63,13 +63,14 @@ class TextTestInterface:
         
         # Initialize function calling system (exactly like main.py)
         calendar_module = self.plugin_manager.get_module('calendar')
+        nlp_module = self.plugin_manager.get_module('nlp')  # Get NLP module like main.py
         self.function_registry = FunctionRegistry(
             self.logger.get_logger("functions"),
             calendar_module  # Pass calendar module like main.py does
         )
         self.function_processor = FunctionCallingProcessor(
             self.function_registry, 
-            None,  # No NLP module for test
+            nlp_module,  # Use NLP module for conversation
             self.logger.get_logger("function_calling")
         )
         
