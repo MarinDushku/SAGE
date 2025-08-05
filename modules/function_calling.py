@@ -872,7 +872,7 @@ JSON RESPONSE:"""
             json_start = llm_response.find('{')
             json_end = llm_response.rfind('}') + 1
             
-            if json_start != -1 and json_end > json_start:
+            if json_start != -1 and json_end > json_start and json_end > json_start + 10:
                 # Extract only the first JSON object (in case LLM returns multiple)
                 json_str = llm_response[json_start:json_end]
                 
@@ -895,8 +895,20 @@ JSON RESPONSE:"""
                 # Reject template responses
                 template_indicators = ["FUNCTION_NAME", "function_name", "your response", "direct answer"]
                 if any(indicator in first_json.lower() for indicator in [ind.lower() for ind in template_indicators]):
-                    self.logger.warning("LLM returned template, using fallback")
-                    return await self._fallback_processing(original_request)
+                    self.logger.warning("LLM returned template JSON, checking for conversational text")
+                    
+                    # Extract text before the JSON as potential conversation
+                    text_before_json = llm_response[:json_start].strip()
+                    if text_before_json and len(text_before_json) > 10:
+                        self.logger.info("Found conversational text before template JSON")
+                        return {
+                            "success": True,
+                            "type": "llm_conversation",
+                            "response": text_before_json
+                        }
+                    
+                    # No useful conversational text, use fallback
+                    return await self._fallback_processing(original_request, llm_response)
                 
                 try:
                     parsed = json.loads(first_json)
