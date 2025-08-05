@@ -830,7 +830,8 @@ class FunctionCallingProcessor:
         functional_patterns = [
             'time', 'schedule', 'meeting', 'calendar', 'appointment', 'event',
             'add', 'remove', 'delete', 'move', 'reschedule', 'today', 'tomorrow',
-            'what time', 'when', 'do i have', 'check my', 'free', 'busy'
+            'what time', 'when', 'do i have', 'check my', 'free', 'busy',
+            'cancel', 'remoce', 'delet', 'got canceled', 'scheduel'
         ]
         
         # Check if it contains functional keywords
@@ -918,8 +919,19 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
             self.logger.info("Simple semantic detection: time query")
             return "time_query"
         
+        # Check for removal requests
+        remove_indicators = ['cancel', 'remove', 'delete', 'got canceled', 'remoce', 'delet']
+        meeting_time_indicators = ['meeting', 'appointment', 'event', 'am', 'pm', 'o\'clock']
+        
+        has_remove_word = any(word in user_lower for word in remove_indicators)
+        has_meeting_time = any(word in user_lower for word in meeting_time_indicators)
+        
+        if has_remove_word and has_meeting_time:
+            self.logger.info("Simple semantic detection: remove request")
+            return "remove_event"
+        
         # Check for calendar lookups
-        calendar_queries = ['do i have', 'what', 'check', 'my schedule', 'my calendar', 'free', 'busy', 'available']
+        calendar_queries = ['do i have', 'what', 'check', 'my schedule', 'my calendar', 'free', 'busy', 'available', 'show me', 'scheduel', 'schedule']
         if any(query in user_lower for query in calendar_queries):
             self.logger.info("Simple semantic detection: calendar lookup")
             return "calendar_lookup"
@@ -1408,6 +1420,8 @@ Answer: A, B, C, D, E, or F"""
                 return await self._handle_time_query()
             elif simple_semantic_result == "calendar_lookup":
                 return await self._handle_calendar_lookup(user_input)
+            elif simple_semantic_result == "remove_event":
+                return await self._handle_remove_event(user_input)
         
         # Third layer: Use LLM for semantic understanding when everything else fails
         if self.nlp_module:
