@@ -1012,9 +1012,10 @@ B) Check calendar/schedule
 C) Ask for time
 D) Remove a meeting
 E) Move a meeting
-F) Something else
+F) Show visual/weekly calendar
+G) Something else
 
-Answer: A, B, C, D, E, or F"""
+Answer: A, B, C, D, E, F, or G"""
 
             # Get LLM response
             llm_result = await self.nlp_module.process_text(semantic_prompt)
@@ -1028,7 +1029,7 @@ Answer: A, B, C, D, E, or F"""
             # Extract just the letter from the response
             intent_letter = None
             for char in response:
-                if char in ['A', 'B', 'C', 'D', 'E', 'F']:
+                if char in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
                     intent_letter = char
                     break
             
@@ -1049,7 +1050,9 @@ Answer: A, B, C, D, E, or F"""
                 return await self._handle_remove_event(user_input)
             elif intent_letter == "E":  # Move meeting
                 return await self._handle_move_event(user_input)
-            else:  # F or other
+            elif intent_letter == "F":  # Show visual/weekly calendar
+                return await self._handle_weekly_calendar()
+            else:  # G or other
                 self.logger.info(f"LLM indicated 'something else' or unknown: {intent_letter}")
                 return None
                 
