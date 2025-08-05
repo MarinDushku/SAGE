@@ -935,26 +935,7 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         """Simple word-based semantic detection before trying LLM"""
         user_lower = user_input.lower()
         
-        # More flexible scheduling patterns
-        schedule_indicators = [
-            'schedul', 'book', 'add', 'create', 'set up', 'plan', 'arrange',
-            'want to schedule', 'need to schedule', 'can you schedule',
-            'i want', 'i need', 'can u', 'could you'
-        ]
-        
-        meeting_indicators = ['meeting', 'appointment', 'event']
-        time_indicators = ['am', 'pm', 'o\'clock', 'at ', 'for ']
-        
-        # Check if it's likely a scheduling request
-        has_schedule_word = any(word in user_lower for word in schedule_indicators)
-        has_meeting_word = any(word in user_lower for word in meeting_indicators)
-        has_time_reference = any(word in user_lower for word in time_indicators + ['tomorrow', 'today', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
-        
-        if has_schedule_word and (has_meeting_word or has_time_reference):
-            self.logger.info("Simple semantic detection: scheduling request")
-            return "schedule_event"
-        
-        # Check for time queries
+        # Check for time queries FIRST
         time_queries = ['time', 'what time', 'current time', 'tell me the time']
         if any(query in user_lower for query in time_queries):
             self.logger.info("Simple semantic detection: time query")
@@ -971,30 +952,60 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
             self.logger.info("Simple semantic detection: remove request")
             return "remove_event"
         
-        # Check for weekly calendar view requests FIRST (before regular calendar)
+        # Check for weekly calendar view requests FIRST (highest priority)
         weekly_phrases = [
             'weekly schedule', 'week schedule', 'weekly calendar', 'week calendar',
             'visual calendar', 'calendar window', 'visual schedule', 'schedule window',
-            'show weekly', 'weekly view', 'calendar gui', 'visual week'
+            'show weekly', 'weekly view', 'calendar gui', 'visual week',
+            'calendar for the week', 'week view', 'visualized calendar', 'visualised calendar'
         ]
         
-        # Also check for combinations
-        has_visual = any(word in user_lower for word in ['visual', 'window', 'gui', 'view'])
+        # Also check for combinations - but be more specific
+        has_visual = any(word in user_lower for word in ['visual', 'visualized', 'visualised', 'window', 'gui'])
         has_weekly = any(word in user_lower for word in ['week', 'weekly'])
-        has_calendar = any(word in user_lower for word in ['schedule', 'calendar'])
+        has_calendar_context = any(word in user_lower for word in ['schedule', 'calendar'])
         
-        # Check specific weekly phrases or visual+calendar combination
+        # Weekly calendar detection - higher priority
         if (any(phrase in user_lower for phrase in weekly_phrases) or 
-            (has_visual and has_calendar) or 
-            (has_weekly and has_calendar)):
+            (has_visual and has_calendar_context) or 
+            (has_weekly and has_calendar_context)):
             self.logger.info("Simple semantic detection: weekly calendar view")
             return "weekly_calendar"
         
-        # Check for calendar lookups (only after weekly check)
-        calendar_queries = ['do i have', 'what', 'check', 'my schedule', 'my calendar', 'free', 'busy', 'available', 'show me', 'scheduel', 'schedule']
-        if any(query in user_lower for query in calendar_queries):
+        # Check for calendar lookups (show/check existing schedule)
+        lookup_phrases = [
+            'what\'s on my', 'whats on my', 'show me my', 'show me what',
+            'show me the schedule', 'show me the calendar', 'what do i have',
+            'do i have', 'check my', 'my schedule for', 'my calendar for'
+        ]
+        calendar_queries = ['what', 'check', 'my schedule', 'my calendar', 'free', 'busy', 'available', 'scheduel']
+        
+        if (any(phrase in user_lower for phrase in lookup_phrases) or 
+            any(query in user_lower for query in calendar_queries)):
             self.logger.info("Simple semantic detection: calendar lookup")
             return "calendar_lookup"
+        
+        # More specific scheduling patterns (only clear scheduling intents)
+        explicit_schedule_phrases = [
+            'schedule a', 'schedule an', 'add a', 'add an', 'create a', 'book a',
+            'set up a', 'plan a', 'arrange a', 'schedule meeting', 'add meeting',
+            'book meeting', 'create meeting', 'schedule appointment', 'add appointment'
+        ]
+        
+        schedule_verbs = ['schedul', 'book', 'add', 'create', 'set up', 'plan', 'arrange']
+        meeting_indicators = ['meeting', 'appointment', 'event']
+        time_indicators = ['am', 'pm', 'o\'clock', 'at ', 'for ']
+        
+        # Only trigger scheduling if it's clearly about creating/adding something new
+        has_explicit_schedule = any(phrase in user_lower for phrase in explicit_schedule_phrases)
+        has_schedule_verb = any(word in user_lower for word in schedule_verbs)
+        has_meeting_word = any(word in user_lower for word in meeting_indicators)
+        has_time_reference = any(word in user_lower for word in time_indicators + ['tomorrow', 'today'])
+        
+        if (has_explicit_schedule or 
+            (has_schedule_verb and has_meeting_word and has_time_reference)):
+            self.logger.info("Simple semantic detection: scheduling request")
+            return "schedule_event"
         
         return None
 
