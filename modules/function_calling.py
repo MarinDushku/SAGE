@@ -435,13 +435,20 @@ class FunctionRegistry:
                         """)
                         
                         # Check for conflicts (events that overlap with the proposed time)
+                        # Two events overlap if: event1_start < event2_end AND event1_end > event2_start
+                        self.logger.info(f"Checking conflicts for {event_datetime} (timestamps: {start_time} to {end_time})")
                         cursor.execute("""
                             SELECT title, start_time, end_time FROM events 
-                            WHERE (start_time < ? AND end_time > ?) OR (start_time < ? AND end_time > ?)
+                            WHERE start_time < ? AND end_time > ?
                             ORDER BY start_time
-                        """, (end_time, start_time, start_time, end_time))
+                        """, (end_time, start_time))
                         
                         conflicts = cursor.fetchall()
+                        
+                        self.logger.info(f"Found {len(conflicts)} conflicts:")
+                        for conflict in conflicts:
+                            conflict_dt = datetime.fromtimestamp(conflict[1])
+                            self.logger.info(f"  - Conflict: '{conflict[0]}' at {conflict_dt} (timestamp: {conflict[1]})")
                         
                         if conflicts:
                             # Time slot is taken - find next available slot
@@ -728,8 +735,8 @@ class FunctionRegistry:
                 # Check for conflicts at the new time
                 cursor.execute("""
                     SELECT title, start_time FROM events 
-                    WHERE event_id != ? AND ((start_time < ? AND end_time > ?) OR (start_time < ? AND end_time > ?))
-                """, (event_id, new_end_time, new_start_time, new_start_time, new_end_time))
+                    WHERE event_id != ? AND start_time < ? AND end_time > ?
+                """, (event_id, new_end_time, new_start_time))
                 
                 conflicts = cursor.fetchall()
                 
