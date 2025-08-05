@@ -182,7 +182,7 @@ class TextTestInterface:
                     
                     # Extract original scheduling parameters from context
                     original_title = context.get('original_title', 'Meeting')
-                    original_date = context.get('original_date', 'today')
+                    original_date = context.get('original_date', 'tomorrow')  # Default to tomorrow, not today
                     
                     # Schedule at the suggested time
                     result = await self.function_registry.execute_function("add_calendar_event", {
