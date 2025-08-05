@@ -40,6 +40,12 @@ class ConversationManager:
         self.pending_command_data = None
         self.confirmation_callback = None
         
+        # Conversational memory for suggestions and context
+        self.pending_suggestion = None  # What SAGE suggested
+        self.suggestion_context = None  # Context about the suggestion
+        self.last_response = None       # SAGE's last response
+        self.conversation_history = []  # Short-term conversation history
+        
         # Callbacks for state changes
         self.state_callbacks: Dict[ConversationState, Callable] = {}
         
@@ -248,6 +254,69 @@ class ConversationManager:
                 
         except asyncio.CancelledError:
             pass  # Normal when state changes
+    
+    def store_suggestion(self, suggestion_text: str, suggestion_data: Dict[str, Any]):
+        """Store a suggestion that SAGE made to the user"""
+        self.pending_suggestion = suggestion_text
+        self.suggestion_context = suggestion_data
+        self.last_response = suggestion_text
+        self.log(f"Stored suggestion: {suggestion_text}")
+        
+        # Add to conversation history
+        self.add_to_history("SAGE", suggestion_text)
+    
+    def add_to_history(self, speaker: str, text: str):
+        """Add a message to conversation history"""
+        self.conversation_history.append({
+            "speaker": speaker,
+            "text": text,
+            "timestamp": time.time()
+        })
+        
+        # Keep only last 10 exchanges
+        if len(self.conversation_history) > 20:  # 10 exchanges (user + SAGE each)
+            self.conversation_history = self.conversation_history[-20:]
+    
+    def get_pending_suggestion(self) -> Optional[Dict[str, Any]]:
+        """Get the current pending suggestion if any"""
+        if self.pending_suggestion and self.suggestion_context:
+            return {
+                "suggestion_text": self.pending_suggestion,
+                "context": self.suggestion_context
+            }
+        return None
+    
+    def clear_suggestion(self):
+        """Clear the pending suggestion"""
+        self.pending_suggestion = None
+        self.suggestion_context = None
+        self.log("Cleared pending suggestion")
+    
+    def is_affirmative_response(self, user_input: str) -> bool:
+        """Check if user input is an affirmative response (yes, sure, ok, etc.)"""
+        affirmative_words = [
+            'yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'sounds good',
+            'that works', 'perfect', 'good', 'fine', 'absolutely', 'definitely',
+            'correct', 'right', 'agreed', 'accept', 'confirm', 'do it', 'please'
+        ]
+        
+        user_lower = user_input.lower().strip()
+        return any(word in user_lower for word in affirmative_words)
+    
+    def is_negative_response(self, user_input: str) -> bool:
+        """Check if user input is a negative response (no, cancel, etc.)"""
+        negative_words = [
+            'no', 'nope', 'nah', 'cancel', 'nevermind', 'never mind', 'stop',
+            'abort', 'decline', 'reject', 'not now', 'later', 'maybe later',
+            'wrong', 'incorrect', 'that\'s wrong', 'not right'
+        ]
+        
+        user_lower = user_input.lower().strip()
+        return any(word in user_lower for word in negative_words)
+    
+    def get_conversation_history(self, limit: int = 10) -> list:
+        """Get recent conversation history"""
+        return self.conversation_history[-limit*2:] if self.conversation_history else []
     
     def get_status(self) -> Dict[str, Any]:
         """Get current conversation manager status"""
