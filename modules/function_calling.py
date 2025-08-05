@@ -955,18 +955,26 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
             self.logger.info("Simple semantic detection: remove request")
             return "remove_event"
         
-        # Check for weekly calendar view requests
-        weekly_indicators = ['week', 'weekly', 'next week', 'this week', 'week schedule', 'weekly schedule', 'visual', 'window', 'gui']
-        calendar_context = ['schedule', 'calendar', 'meetings', 'events']
+        # Check for weekly calendar view requests FIRST (before regular calendar)
+        weekly_phrases = [
+            'weekly schedule', 'week schedule', 'weekly calendar', 'week calendar',
+            'visual calendar', 'calendar window', 'visual schedule', 'schedule window',
+            'show weekly', 'weekly view', 'calendar gui', 'visual week'
+        ]
         
-        has_weekly_word = any(word in user_lower for word in weekly_indicators)
-        has_calendar_context = any(word in user_lower for word in calendar_context)
+        # Also check for combinations
+        has_visual = any(word in user_lower for word in ['visual', 'window', 'gui', 'view'])
+        has_weekly = any(word in user_lower for word in ['week', 'weekly'])
+        has_calendar = any(word in user_lower for word in ['schedule', 'calendar'])
         
-        if has_weekly_word and has_calendar_context:
+        # Check specific weekly phrases or visual+calendar combination
+        if (any(phrase in user_lower for phrase in weekly_phrases) or 
+            (has_visual and has_calendar) or 
+            (has_weekly and has_calendar)):
             self.logger.info("Simple semantic detection: weekly calendar view")
             return "weekly_calendar"
         
-        # Check for calendar lookups
+        # Check for calendar lookups (only after weekly check)
         calendar_queries = ['do i have', 'what', 'check', 'my schedule', 'my calendar', 'free', 'busy', 'available', 'show me', 'scheduel', 'schedule']
         if any(query in user_lower for query in calendar_queries):
             self.logger.info("Simple semantic detection: calendar lookup")
