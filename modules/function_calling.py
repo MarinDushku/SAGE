@@ -889,6 +889,192 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         return await self._fallback_processing(user_input)
     
     
+    async def _semantic_function_detection(self, user_input: str) -> Dict[str, Any]:
+        """Use LLM to understand semantic meaning when keyword matching fails"""
+        try:
+            self.logger.info("Attempting semantic function detection")
+            
+            # Simple prompt for intent detection
+            semantic_prompt = f"""The user said: "{user_input}"
+
+Which function does this request match?
+
+Functions available:
+- TIME_QUERY: asking for current time or date
+- CALENDAR_LOOKUP: checking schedule, calendar, meetings, or availability  
+- SCHEDULE_EVENT: adding, scheduling, booking, or creating meetings/events/appointments
+- REMOVE_EVENT: removing, deleting, or canceling meetings/events
+- MOVE_EVENT: moving, rescheduling, or changing meeting times
+- UNKNOWN: doesn't match any function
+
+Respond with just one word: TIME_QUERY, CALENDAR_LOOKUP, SCHEDULE_EVENT, REMOVE_EVENT, MOVE_EVENT, or UNKNOWN"""
+
+            # Get LLM response
+            llm_result = await self.nlp_module.process_text(semantic_prompt)
+            if not llm_result.get('success'):
+                self.logger.warning("Semantic detection LLM call failed")
+                return None
+                
+            intent = llm_result['response']['text'].strip().upper()
+            self.logger.info(f"LLM detected intent: {intent}")
+            
+            # Map intent back to existing proven functions
+            if intent == "TIME_QUERY":
+                return await self._handle_time_query()
+            elif intent == "CALENDAR_LOOKUP":
+                return await self._handle_calendar_lookup(user_input)
+            elif intent == "SCHEDULE_EVENT":
+                return await self._handle_schedule_event(user_input)
+            elif intent == "REMOVE_EVENT":
+                return await self._handle_remove_event(user_input)
+            elif intent == "MOVE_EVENT":
+                return await self._handle_move_event(user_input)
+            else:
+                self.logger.info(f"LLM returned UNKNOWN or unrecognized intent: {intent}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error in semantic function detection: {e}")
+            return None
+    
+    async def _handle_time_query(self) -> Dict[str, Any]:
+        """Handle time queries detected semantically"""
+        result = await self.function_registry.execute_function("get_current_time", {})
+        if result['success']:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": f"It's currently {result['result']}"
+            }
+        return None
+    
+    async def _handle_calendar_lookup(self, user_input: str) -> Dict[str, Any]:
+        """Handle calendar lookup detected semantically"""
+        # Extract date if possible, default to today
+        date_param = "today"
+        user_lower = user_input.lower()
+        if "tomorrow" in user_lower:
+            date_param = "tomorrow"
+        elif "yesterday" in user_lower:
+            date_param = "yesterday"
+            
+        result = await self.function_registry.execute_function("lookup_calendar", {"date": date_param})
+        if result['success']:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": str(result['result'])
+            }
+        return None
+    
+    async def _handle_schedule_event(self, user_input: str) -> Dict[str, Any]:
+        """Handle scheduling detected semantically"""
+        # Use same parameter extraction logic as keyword-based system
+        title = "Meeting"
+        date_param = "today"
+        time_param = None
+        
+        user_lower = user_input.lower()
+        if "tomorrow" in user_lower:
+            date_param = "tomorrow"
+        elif "today" in user_lower:
+            date_param = "today"
+            
+        # Extract time if mentioned (same regex as keyword system)
+        import re
+        time_patterns = [
+            r'(\d{1,2})\s*(am|pm)',
+            r'(\d{1,2}):(\d{2})\s*(am|pm)', 
+            r'(\d{1,2})\s*o\'?clock',
+            r'at\s+(\d{1,2})',
+            r'(\d{1,2})\s*a\.?m\.?',
+            r'(\d{1,2})\s*p\.?m\.?'
+        ]
+        
+        for pattern in time_patterns:
+            match = re.search(pattern, user_lower)
+            if match:
+                time_param = match.group(0)
+                break
+                
+        # Try to extract meeting title
+        if "meeting" in user_lower:
+            title = "Meeting"
+        elif "appointment" in user_lower:
+            title = "Appointment"
+            
+        result = await self.function_registry.execute_function("add_calendar_event", {
+            "title": title,
+            "date": date_param,
+            "time": time_param
+        })
+        
+        if result['success']:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": str(result['result'])
+            }
+        return None
+    
+    async def _handle_remove_event(self, user_input: str) -> Dict[str, Any]:
+        """Handle event removal detected semantically"""
+        # Use same parameter extraction as keyword system
+        date_param = "today"
+        time_param = None
+        title_param = None
+        
+        user_lower = user_input.lower()
+        if "tomorrow" in user_lower:
+            date_param = "tomorrow"
+        elif "yesterday" in user_lower:
+            date_param = "yesterday"
+            
+        # Extract time (same regex as keyword system)
+        import re
+        time_patterns = [
+            r'(\d{1,2})\s*(am|pm)',
+            r'(\d{1,2}):(\d{2})\s*(am|pm)', 
+            r'(\d{1,2})\s*o\'?clock',
+            r'at\s+(\d{1,2})',
+            r'(\d{1,2})\s*a\.?m\.?',
+            r'(\d{1,2})\s*p\.?m\.?'
+        ]
+        
+        for pattern in time_patterns:
+            match = re.search(pattern, user_lower)
+            if match:
+                time_param = match.group(0)
+                break
+        
+        if "meeting" in user_lower:
+            title_param = "meeting"
+        elif "appointment" in user_lower:
+            title_param = "appointment"
+            
+        result = await self.function_registry.execute_function("remove_calendar_event", {
+            "date": date_param,
+            "time": time_param,
+            "title": title_param
+        })
+        
+        if result['success']:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": str(result['result'])
+            }
+        return None
+    
+    async def _handle_move_event(self, user_input: str) -> Dict[str, Any]:
+        """Handle event moving detected semantically"""
+        # This is more complex - for now return a helpful message
+        return {
+            "success": True,
+            "type": "semantic_function",
+            "response": "I understand you want to move a meeting. Please specify which meeting and what time to move it to, like 'move my 9am meeting to 10am'."
+        }
+
     async def _fallback_processing(self, user_input: str) -> Dict[str, Any]:
         """Enhanced fallback processing when LLM parsing fails"""
         self.logger.info(f"Using fallback processing for: '{user_input}'")
@@ -1162,7 +1348,16 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
                     "response": str(result['result'])
                 }
         
-        self.logger.info("Fallback could not classify request")
+        self.logger.info("Fallback could not classify request, trying semantic understanding")
+        
+        # Second layer: Use LLM for semantic understanding when keywords fail
+        if self.nlp_module:
+            semantic_result = await self._semantic_function_detection(user_input)
+            if semantic_result:
+                return semantic_result
+        
+        # Last resort fallback
+        self.logger.info("Semantic understanding also failed")
         return {
             "success": True,
             "type": "fallback_unknown",
