@@ -55,6 +55,14 @@ class TextTestInterface:
             self.main_log.warning("Failed to load calendar module, using direct DB access")
         else:
             print("✅ Calendar module loaded successfully")
+            
+        # Load NLP module for conversation
+        print("🔧 Loading NLP module...")
+        nlp_result = await self.plugin_manager.load_module('nlp')
+        if not nlp_result:
+            self.main_log.warning("Failed to load NLP module, conversation will be limited")
+        else:
+            print("✅ NLP module loaded successfully")
         
         # Initialize conversation manager for memory
         self.conversation_manager = ConversationManager(
@@ -64,6 +72,13 @@ class TextTestInterface:
         # Initialize function calling system (exactly like main.py)
         calendar_module = self.plugin_manager.get_module('calendar')
         nlp_module = self.plugin_manager.get_module('nlp')  # Get NLP module like main.py
+        
+        # Debug: Check if NLP module is available
+        if nlp_module:
+            print("✅ NLP module available for conversation")
+        else:
+            print("❌ NLP module not available - conversation will be limited")
+            
         self.function_registry = FunctionRegistry(
             self.logger.get_logger("functions"),
             calendar_module  # Pass calendar module like main.py does
