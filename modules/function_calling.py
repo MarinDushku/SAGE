@@ -904,7 +904,7 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         # Fallback for conversation
         return {
             "success": True,
-            "type": "conversation_fallback",
+            "type": "conversation_fallback", 
             "response": "Hello! I'm SAGE, your assistant. How can I help you today?"
         }
     
@@ -912,7 +912,7 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         """Handle functional requests that might need function calls"""
         self.logger.info("Processing functional request")
         
-        # First try simple semantic detection
+        # Layer 1: Try simple semantic detection
         simple_semantic_result = self._simple_semantic_detection(user_input)
         if simple_semantic_result:
             self.logger.info(f"Simple semantic detected: {simple_semantic_result}")
@@ -927,7 +927,23 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
             elif simple_semantic_result == "weekly_calendar":
                 return await self._handle_weekly_calendar()
         
-        # Fall back to enhanced keyword-based fallback processing
+        # Layer 2: Try LLM semantic detection
+        if self.nlp_module:
+            try:
+                self.logger.info("Simple semantic failed, trying LLM semantic detection")
+                semantic_result = await asyncio.wait_for(
+                    self._semantic_function_detection(user_input), 
+                    timeout=5.0
+                )
+                if semantic_result:
+                    return semantic_result
+            except asyncio.TimeoutError:
+                self.logger.warning("LLM semantic detection timed out")
+            except Exception as e:
+                self.logger.warning(f"LLM semantic detection failed: {e}")
+        
+        # Layer 3: Fall back to enhanced keyword-based fallback processing
+        self.logger.info("Both semantic layers failed, using keyword fallback")
         return await self._fallback_processing(user_input)
     
     
@@ -961,9 +977,9 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         ]
         
         # Also check for combinations - but be more specific
-        has_visual = any(word in user_lower for word in ['visual', 'visualized', 'visualised', 'window', 'gui'])
+        has_visual = any(word in user_lower for word in ['visual', 'visualized', 'visualised', 'visualisation', 'visualization', 'window', 'gui'])
         has_weekly = any(word in user_lower for word in ['week', 'weekly'])
-        has_calendar_context = any(word in user_lower for word in ['schedule', 'calendar'])
+        has_calendar_context = any(word in user_lower for word in ['schedule', 'calendar', 'scheduel'])
         
         # Weekly calendar detection - higher priority
         if (any(phrase in user_lower for phrase in weekly_phrases) or 
