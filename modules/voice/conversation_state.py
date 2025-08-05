@@ -305,14 +305,35 @@ class ConversationManager:
     
     def is_negative_response(self, user_input: str) -> bool:
         """Check if user input is a negative response (no, cancel, etc.)"""
-        negative_words = [
-            'no', 'nope', 'nah', 'cancel', 'nevermind', 'never mind', 'stop',
+        user_lower = user_input.lower().strip()
+        
+        # Don't treat functional requests as negative responses
+        # Check if this looks like a functional request first
+        functional_indicators = [
+            'meeting', 'appointment', 'event', 'schedule', 'time', 'calendar',
+            'tomorrow', 'today', 'am', 'pm', 'o\'clock', 'at ', 'for ',
+            'got canceled', 'was canceled', 'remove', 'delete'
+        ]
+        
+        if any(indicator in user_lower for indicator in functional_indicators):
+            return False
+        
+        # Simple negative responses (short and direct)
+        simple_negatives = [
+            'no', 'nope', 'nah', 'nevermind', 'never mind', 'stop',
             'abort', 'decline', 'reject', 'not now', 'later', 'maybe later',
             'wrong', 'incorrect', 'that\'s wrong', 'not right'
         ]
         
-        user_lower = user_input.lower().strip()
-        return any(word in user_lower for word in negative_words)
+        # For "cancel" - only if it's a simple command, not part of a longer functional statement
+        if 'cancel' in user_lower:
+            # If it's just "cancel" or very short, treat as negative
+            if len(user_input.strip()) <= 10:
+                return True
+            # Otherwise, it might be "meeting got canceled" which is functional
+            return False
+        
+        return any(word in user_lower for word in simple_negatives)
     
     def get_conversation_history(self, limit: int = 10) -> list:
         """Get recent conversation history"""
