@@ -156,6 +156,13 @@ class FunctionRegistry:
             parameters={},
             handler=self._get_system_status
         )
+        
+        self.register_function(
+            "show_weekly_calendar",
+            description="Show visual weekly calendar in a GUI window",
+            parameters={},
+            handler=self._show_weekly_calendar
+        )
     
     def register_function(self, name: str, description: str, parameters: Dict, handler: Callable):
         """Register a new function that the LLM can call"""
@@ -513,6 +520,23 @@ class FunctionRegistry:
         # This would interface with the resource monitor
         return "System status: All modules running normally"
     
+    def _show_weekly_calendar(self) -> str:
+        """Show weekly calendar GUI"""
+        try:
+            from modules.calendar_viewer import show_weekly_calendar
+            result = show_weekly_calendar(self.calendar_module)
+            
+            if result.get('success'):
+                return result.get('result', 'Weekly calendar opened.')
+            else:
+                return f"Failed to open calendar: {result.get('error', 'Unknown error')}"
+                
+        except ImportError:
+            return "Calendar viewer module not available."
+        except Exception as e:
+            self.logger.error(f"Error showing weekly calendar: {e}")
+            return f"Error opening weekly calendar: {str(e)}"
+    
     async def _find_next_available_hour(self, preferred_datetime: datetime, cursor) -> Optional[datetime]:
         """Find the next available hour slot starting from preferred time"""
         try:
@@ -831,7 +855,8 @@ class FunctionCallingProcessor:
             'time', 'schedule', 'meeting', 'calendar', 'appointment', 'event',
             'add', 'remove', 'delete', 'move', 'reschedule', 'today', 'tomorrow',
             'what time', 'when', 'do i have', 'check my', 'free', 'busy',
-            'cancel', 'remoce', 'delet', 'got canceled', 'scheduel'
+            'cancel', 'remoce', 'delet', 'got canceled', 'scheduel',
+            'week', 'weekly', 'visual', 'window', 'gui'
         ]
         
         # Check if it contains functional keywords
@@ -929,6 +954,17 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         if has_remove_word and has_meeting_time:
             self.logger.info("Simple semantic detection: remove request")
             return "remove_event"
+        
+        # Check for weekly calendar view requests
+        weekly_indicators = ['week', 'weekly', 'next week', 'this week', 'week schedule', 'weekly schedule', 'visual', 'window', 'gui']
+        calendar_context = ['schedule', 'calendar', 'meetings', 'events']
+        
+        has_weekly_word = any(word in user_lower for word in weekly_indicators)
+        has_calendar_context = any(word in user_lower for word in calendar_context)
+        
+        if has_weekly_word and has_calendar_context:
+            self.logger.info("Simple semantic detection: weekly calendar view")
+            return "weekly_calendar"
         
         # Check for calendar lookups
         calendar_queries = ['do i have', 'what', 'check', 'my schedule', 'my calendar', 'free', 'busy', 'available', 'show me', 'scheduel', 'schedule']
@@ -1134,6 +1170,22 @@ Answer: A, B, C, D, E, or F"""
             "type": "semantic_function",
             "response": "I understand you want to move a meeting. Please specify which meeting and what time to move it to, like 'move my 9am meeting to 10am'."
         }
+    
+    async def _handle_weekly_calendar(self) -> Dict[str, Any]:
+        """Handle weekly calendar view request"""
+        result = await self.function_registry.execute_function("show_weekly_calendar", {})
+        if result['success']:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": result['result']
+            }
+        else:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": f"Unable to open weekly calendar: {result.get('error', 'Unknown error')}"
+            }
 
     async def _fallback_processing(self, user_input: str) -> Dict[str, Any]:
         """Enhanced fallback processing when LLM parsing fails"""
@@ -1422,6 +1474,8 @@ Answer: A, B, C, D, E, or F"""
                 return await self._handle_calendar_lookup(user_input)
             elif simple_semantic_result == "remove_event":
                 return await self._handle_remove_event(user_input)
+            elif simple_semantic_result == "weekly_calendar":
+                return await self._handle_weekly_calendar()
         
         # Third layer: Use LLM for semantic understanding when everything else fails
         if self.nlp_module:
