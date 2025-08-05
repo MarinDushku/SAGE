@@ -24,16 +24,22 @@ class TextTestInterface:
     """Simple text interface for testing SAGE functionality"""
     
     def __init__(self):
+        print("🔧 Initializing test interface...")
+        
+        print("📋 Setting up logger...")
         self.logger = Logger("SAGE-TEST")
         self.main_log = self.logger.get_logger("test")
         
+        print("⚙️ Loading configuration...")
         # Initialize minimal core components (like main.py does)
         self.config_manager = ConfigManager("config.yaml")
         self.config_manager.load_config()
         
+        print("💾 Setting up cache and event bus...")
         self.cache_manager = CacheManager(max_memory_mb=50, default_ttl=3600)
         self.event_bus = EventBus(max_queue_size=100)
         
+        print("🔌 Initializing plugin manager...")
         # Initialize plugin manager (same as main.py)
         self.plugin_manager = PluginManager()
         self.plugin_manager.set_dependencies(
@@ -42,6 +48,7 @@ class TextTestInterface:
             cache_manager=self.cache_manager,
             logger=self.logger
         )
+        print("✅ Test interface initialized")
         
     async def initialize(self):
         """Initialize the plugin system like main.py does"""
@@ -305,11 +312,15 @@ class TextTestInterface:
 async def main():
     """Main entry point"""
     try:
+        print("🚀 Starting SAGE Text Test Interface...")
         interface = TextTestInterface()
+        print("✅ Interface created, starting run...")
         await interface.run()
         return 0
     except Exception as e:
         print(f"❌ Failed to start test interface: {e}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         return 1
 
 
