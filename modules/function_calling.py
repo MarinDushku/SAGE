@@ -798,62 +798,14 @@ class FunctionCallingProcessor:
         self.logger = logger or logging.getLogger(__name__)
     
     async def process_request(self, user_input: str) -> Dict[str, Any]:
-        """Process user request using function calling"""
+        """Process user request using appropriate approach"""
         try:
-            # Create prompt for LLM
-            function_catalog = self.function_registry.get_function_catalog()
-            
-            # Ultra-simple prompt without confusing examples
-            prompt = f"""TASK: Analyze user request and call appropriate function.
-
-USER REQUEST: "{user_input}"
-
-AVAILABLE FUNCTIONS:
-1. get_current_time - Get current time
-2. lookup_calendar - Check calendar (needs date parameter)  
-3. add_calendar_event - Add event (needs title, date, time)
-
-INSTRUCTIONS:
-- If asking for TIME: call get_current_time
-- If asking about SCHEDULE/CALENDAR: call lookup_calendar  
-- If want to ADD/SCHEDULE meeting: call add_calendar_event
-- Otherwise: give direct response
-
-RESPOND WITH JSON ONLY:
-{{"functions_to_call": [{{"function_name": "FUNCTION_NAME", "parameters": {{}}}}]}}
-
-OR
-
-{{"functions_to_call": [], "response": "Direct answer"}}
-
-JSON RESPONSE:"""
-
-            # Try LLM first but expect it to fail, so fallback quickly
-            llm_response_for_conversation = None
-            if self.nlp_module:
-                self.logger.info("Attempting LLM processing...")
-                try:
-                    llm_result = await self.nlp_module.process_text(prompt)
-                    if llm_result.get('success'):
-                        response_text = llm_result['response']['text']
-                        self.logger.info(f"LLM response: {response_text[:100]}...")
-                        
-                        # Store LLM response for potential conversation use
-                        llm_response_for_conversation = response_text
-                        
-                        # Try to parse LLM response, but fallback quickly if it fails
-                        llm_result = await self._parse_llm_response(response_text, user_input)
-                        if llm_result.get('type') != 'direct_response' or 'template' not in str(llm_result):
-                            return llm_result
-                        else:
-                            self.logger.info("LLM gave poor response, using fallback")
-                except Exception as e:
-                    self.logger.info(f"LLM processing failed: {e}")
-            
-            # Use enhanced fallback as primary system
-            self.logger.info("Using enhanced fallback processing")
-            return await self._fallback_processing(user_input, llm_response_for_conversation)
-            
+            # First, determine if this is conversational or functional
+            if self._is_conversational_input(user_input):
+                return await self._handle_conversation(user_input)
+            else:
+                return await self._handle_function_request(user_input)
+                
         except Exception as e:
             self.logger.error(f"Error processing request: {e}")
             return {
@@ -862,131 +814,82 @@ JSON RESPONSE:"""
                 "fallback_response": "I'm sorry, I had trouble processing your request."
             }
     
-    async def _parse_llm_response(self, llm_response: str, original_request: str) -> Dict[str, Any]:
-        """Parse LLM response and execute function calls"""
+    def _is_conversational_input(self, user_input: str) -> bool:
+        """Determine if input is conversational rather than functional"""
+        user_lower = user_input.lower().strip()
+        
+        # Conversational patterns
+        conversational_patterns = [
+            'hi', 'hello', 'hey', 'how are you', 'how have you been', 'how are things',
+            'what\'s up', 'whats up', 'good morning', 'good afternoon', 'good evening',
+            'how\'s it going', 'hows it going', 'nice to meet you', 'pleasure to meet you',
+            'tell me about yourself', 'who are you', 'what can you do'
+        ]
+        
+        # Functional patterns (if any of these are present, it's functional)
+        functional_patterns = [
+            'time', 'schedule', 'meeting', 'calendar', 'appointment', 'event',
+            'add', 'remove', 'delete', 'move', 'reschedule', 'today', 'tomorrow',
+            'what time', 'when', 'do i have', 'check my', 'free', 'busy'
+        ]
+        
+        # Check if it contains functional keywords
+        if any(pattern in user_lower for pattern in functional_patterns):
+            return False
+            
+        # Check if it matches conversational patterns
+        if any(pattern in user_lower for pattern in conversational_patterns):
+            return True
+            
+        # Short inputs are likely conversational
+        if len(user_input.strip()) < 10:
+            return True
+            
+        # Default to conversational for unclear cases
+        return True
+    
+    async def _handle_conversation(self, user_input: str) -> Dict[str, Any]:
+        """Handle conversational input with simple prompt"""
+        if not self.nlp_module:
+            return {
+                "success": True,
+                "type": "fallback_unknown",
+                "response": "Hello! I'm SAGE, your assistant. I can help with time, calendar, and scheduling tasks."
+            }
+        
+        # Simple conversational prompt
+        conversation_prompt = f"""You are SAGE, a helpful voice assistant. The user said: "{user_input}"
+
+Respond naturally and conversationally. Keep your response brief and friendly."""
+
         try:
-            # Clean the response
-            llm_response = llm_response.strip()
-            
-            # Try to extract JSON from LLM response
-            json_start = llm_response.find('{')
-            json_end = llm_response.rfind('}') + 1
-            
-            if json_start != -1 and json_end > json_start and json_end > json_start + 10:
-                # Extract only the first JSON object (in case LLM returns multiple)
-                json_str = llm_response[json_start:json_end]
-                
-                # Find the end of the first complete JSON object
-                brace_count = 0
-                first_json_end = json_start
-                for i, char in enumerate(llm_response[json_start:], json_start):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            first_json_end = i + 1
-                            break
-                
-                # Extract only the first JSON object
-                first_json = llm_response[json_start:first_json_end]
-                self.logger.info(f"Attempting to parse first JSON: {first_json}")
-                
-                # Reject template responses
-                template_indicators = ["FUNCTION_NAME", "function_name", "your response", "direct answer"]
-                if any(indicator in first_json.lower() for indicator in [ind.lower() for ind in template_indicators]):
-                    self.logger.warning("LLM returned template JSON, checking for conversational text")
-                    
-                    # Extract text before the JSON as potential conversation
-                    text_before_json = llm_response[:json_start].strip()
-                    if text_before_json and len(text_before_json) > 10:
-                        self.logger.info("Found conversational text before template JSON")
-                        return {
-                            "success": True,
-                            "type": "llm_conversation",
-                            "response": text_before_json
-                        }
-                    
-                    # No useful conversational text, use fallback
-                    return await self._fallback_processing(original_request, llm_response)
-                
-                try:
-                    parsed = json.loads(first_json)
-                    self.logger.info(f"Successfully parsed JSON: {parsed}")
-                except json.JSONDecodeError as json_err:
-                    self.logger.warning(f"JSON parsing failed: {json_err}")
-                    # Try to fix common JSON issues
-                    fixed_json = first_json.replace("'", '"')  # Replace single quotes with double quotes
-                    try:
-                        parsed = json.loads(fixed_json)
-                        self.logger.info(f"Fixed and parsed JSON: {parsed}")
-                    except json.JSONDecodeError:
-                        self.logger.error("Could not fix JSON, falling back")
-                        return await self._fallback_processing(original_request)
-                
-                functions_to_call = parsed.get('functions_to_call', [])
-                direct_response = parsed.get('response', '')
-                
-                # If no functions to call, return direct response
-                if not functions_to_call:
-                    self.logger.info("No functions to call, returning direct response")
-                    return {
-                        "success": True,
-                        "type": "direct_response",
-                        "response": direct_response or "I'm not sure how to help with that."
-                    }
-                
-                # Execute function calls
-                self.logger.info(f"Executing {len(functions_to_call)} function(s)")
-                results = []
-                for func_call in functions_to_call:
-                    func_name = func_call.get('function_name')
-                    parameters = func_call.get('parameters', {})
-                    
-                    if func_name:
-                        self.logger.info(f"Calling function: {func_name} with parameters: {parameters}")
-                        result = await self.function_registry.execute_function(func_name, parameters)
-                        results.append({
-                            "function": func_name,
-                            "parameters": parameters,
-                            "result": result
-                        })
-                
+            self.logger.info("Processing conversational input")
+            llm_result = await self.nlp_module.process_text(conversation_prompt)
+            if llm_result.get('success'):
+                response_text = llm_result['response']['text'].strip()
                 return {
                     "success": True,
-                    "type": "function_calls",
-                    "function_results": results,
-                    "response": self._generate_response_from_results(results, original_request)
+                    "type": "conversation",
+                    "response": response_text
                 }
-            
-            else:
-                # Could not find JSON, treat as direct response
-                self.logger.warning("No JSON found in LLM response, treating as direct response")
-                return {
-                    "success": True,
-                    "type": "direct_response",
-                    "response": llm_response or "I'm not sure how to help with that."
-                }
-                
         except Exception as e:
-            self.logger.error(f"Error parsing LLM response: {e}")
-            return await self._fallback_processing(original_request)
-    
-    def _generate_response_from_results(self, results: List[Dict], original_request: str) -> str:
-        """Generate natural response from function call results"""
-        if not results:
-            return "I couldn't process your request."
+            self.logger.warning(f"Conversation processing failed: {e}")
         
-        responses = []
-        for result in results:
-            if result['result']['success']:
-                responses.append(str(result['result']['result']))
-            else:
-                responses.append(f"Error: {result['result']['error']}")
-        
-        return " ".join(responses)
+        # Fallback for conversation
+        return {
+            "success": True,
+            "type": "conversation_fallback",
+            "response": "Hello! I'm SAGE, your assistant. How can I help you today?"
+        }
     
-    async def _fallback_processing(self, user_input: str, llm_response_for_conversation: str = None) -> Dict[str, Any]:
+    async def _handle_function_request(self, user_input: str) -> Dict[str, Any]:
+        """Handle functional requests that might need function calls"""
+        # Use enhanced fallback as primary system for function requests
+        self.logger.info("Processing functional request")
+        return await self._fallback_processing(user_input)
+    
+    
+    async def _fallback_processing(self, user_input: str) -> Dict[str, Any]:
         """Enhanced fallback processing when LLM parsing fails"""
         self.logger.info(f"Using fallback processing for: '{user_input}'")
         user_lower = user_input.lower()
@@ -1260,17 +1163,6 @@ JSON RESPONSE:"""
                 }
         
         self.logger.info("Fallback could not classify request")
-        
-        # If we have an LLM response for general conversation, use it
-        if llm_response_for_conversation:
-            self.logger.info("Using LLM response for general conversation")
-            return {
-                "success": True,
-                "type": "llm_conversation",
-                "response": llm_response_for_conversation.strip()
-            }
-        
-        # Last resort fallback
         return {
             "success": True,
             "type": "fallback_unknown",
