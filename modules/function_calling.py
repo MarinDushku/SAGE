@@ -292,11 +292,13 @@ class FunctionRegistry:
                     import sqlite3
                     from pathlib import Path
                     
-                    # Get database path
-                    db_path = Path("data/calendar.db")
+                    # Get database path - make it absolute to avoid issues
+                    db_path = Path("data/calendar.db").resolve()
+                    
+                    self.logger.info(f"Looking for database at: {db_path}")
                     
                     if not db_path.exists():
-                        return f"No events found for {date_str}"
+                        return f"No events found for {date_str} (no database file)"
                     
                     # Query events directly from database
                     with sqlite3.connect(str(db_path)) as conn:
@@ -382,12 +384,15 @@ class FunctionRegistry:
                     import uuid
                     from pathlib import Path
                     
-                    # Get database path
-                    db_path = Path("data/calendar.db")
+                    # Get database path - make it absolute to avoid issues
+                    db_path = Path("data/calendar.db").resolve()
+                    
+                    self.logger.info(f"Adding event to database at: {db_path}")
                     
                     # Create database if it doesn't exist
                     if not db_path.exists():
                         db_path.parent.mkdir(parents=True, exist_ok=True)
+                        self.logger.info(f"Created database directory: {db_path.parent}")
                     
                     # Check for conflicts first
                     with sqlite3.connect(str(db_path)) as conn:
@@ -453,7 +458,7 @@ class FunctionRegistry:
                     
                     formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
                     self.logger.info(f"Successfully added event to database: {title}")
-                    return f"Successfully scheduled: {title} on {formatted_time}"
+                    return f"All set! {title} on {formatted_time} - it's in your calendar!"
                     
                 except Exception as e:
                     self.logger.error(f"Exception in direct database add: {e}")
@@ -964,13 +969,18 @@ JSON RESPONSE:"""
         add_keywords = ['schedule', 'add', 'create', 'book', 'set up', 'plan', 'arrange']
         action_phrases = [
             'schedule a', 'schedule an', 'add a', 'add an', 'create a', 'book a', 
-            'set up a', 'plan a', 'arrange a', 'schedule meeting', 'add meeting'
+            'set up a', 'plan a', 'arrange a', 'schedule meeting', 'add meeting',
+            'can you schedule', 'can u schedule', 'could you schedule', 'please schedule'
         ]
         
-        # Check for scheduling/adding requests first
-        if (any(word in user_lower for word in add_keywords) and 
-            any(phrase in user_lower for phrase in action_phrases + ['meeting', 'event', 'appointment'])):
-            
+        # Check for scheduling/adding requests first - more flexible matching
+        is_scheduling_request = (
+            any(word in user_lower for word in add_keywords) and 
+            (any(phrase in user_lower for phrase in action_phrases) or
+             any(event_word in user_lower for event_word in ['meeting', 'event', 'appointment']))
+        )
+        
+        if is_scheduling_request:
             self.logger.info("Fallback detected scheduling request")
             
             # Extract parameters
