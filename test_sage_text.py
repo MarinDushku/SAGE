@@ -192,7 +192,15 @@ class TextTestInterface:
                     })
                     
                     if result['success']:
-                        return f"Perfect! {result['result']}"
+                        response_text = result['result']
+                        # Check if the result contains another conflict suggestion
+                        if 'How about' in response_text and 'instead?' in response_text:
+                            # There's another conflict - store this new suggestion
+                            await self._check_and_store_suggestion_from_text(response_text, {
+                                'original_title': original_title,
+                                'original_date': original_date
+                            })
+                        return f"Perfect! {response_text}"
                     else:
                         return f"Sorry, there was an error: {result.get('error', 'Unknown error')}"
             
@@ -247,6 +255,26 @@ class TextTestInterface:
                 
         except Exception as e:
             # Don't fail if suggestion detection fails
+            pass
+    
+    async def _check_and_store_suggestion_from_text(self, response_text: str, context: dict):
+        """Store suggestion from text response (for chained conflicts)"""
+        try:
+            import re
+            time_match = re.search(r'How about (\d{1,2}:?\d{0,2}\s*(?:AM|PM|am|pm))', response_text) 
+            if time_match:
+                suggested_time = time_match.group(1)
+                
+                suggestion_context = {
+                    'type': 'reschedule_conflict',
+                    'suggested_time': suggested_time,
+                    'original_title': context.get('original_title', 'Meeting'),
+                    'original_date': context.get('original_date', 'today'),
+                    'original_time': None
+                }
+                
+                self.conversation_manager.store_suggestion(response_text, suggestion_context)
+        except Exception as e:
             pass
 
 
