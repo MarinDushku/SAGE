@@ -910,8 +910,24 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
     
     async def _handle_function_request(self, user_input: str) -> Dict[str, Any]:
         """Handle functional requests that might need function calls"""
-        # Use enhanced fallback as primary system for function requests
         self.logger.info("Processing functional request")
+        
+        # First try simple semantic detection
+        simple_semantic_result = self._simple_semantic_detection(user_input)
+        if simple_semantic_result:
+            self.logger.info(f"Simple semantic detected: {simple_semantic_result}")
+            if simple_semantic_result == "schedule_event":
+                return await self._handle_schedule_event(user_input)
+            elif simple_semantic_result == "time_query":
+                return await self._handle_time_query()
+            elif simple_semantic_result == "calendar_lookup":
+                return await self._handle_calendar_lookup(user_input)
+            elif simple_semantic_result == "remove_event":
+                return await self._handle_remove_event(user_input)
+            elif simple_semantic_result == "weekly_calendar":
+                return await self._handle_weekly_calendar()
+        
+        # Fall back to enhanced keyword-based fallback processing
         return await self._fallback_processing(user_input)
     
     
