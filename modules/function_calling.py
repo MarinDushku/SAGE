@@ -304,6 +304,10 @@ class FunctionRegistry:
                     with sqlite3.connect(str(db_path)) as conn:
                         cursor = conn.cursor()
                         
+                        # Debug the query parameters
+                        self.logger.info(f"Query parameters: start_time={start_time}, end_time={end_time}")
+                        self.logger.info(f"Query date range: {start_of_day} to {end_of_day}")
+                        
                         cursor.execute("""
                             SELECT * FROM events 
                             WHERE start_time >= ? AND start_time <= ?
@@ -312,8 +316,21 @@ class FunctionRegistry:
                         
                         columns = [description[0] for description in cursor.description]
                         events = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                        
+                        # Also check total events in database for debugging
+                        cursor.execute("SELECT COUNT(*) FROM events")
+                        total_events = cursor.fetchone()[0]
+                        self.logger.info(f"Total events in database: {total_events}")
+                        
+                        # Show all events for debugging
+                        if total_events > 0:
+                            cursor.execute("SELECT title, start_time, end_time FROM events ORDER BY start_time")
+                            all_events = cursor.fetchall()
+                            for event in all_events:
+                                event_dt = datetime.fromtimestamp(event[1])
+                                self.logger.info(f"DB Event: '{event[0]}' at {event_dt} (timestamp: {event[1]})")
                     
-                    self.logger.info(f"Found {len(events)} events")
+                    self.logger.info(f"Found {len(events)} events matching criteria")
                     
                     if events:
                         event_list = []
@@ -455,6 +472,16 @@ class FunctionRegistry:
                         ))
                         
                         conn.commit()
+                        
+                        # Verify the event was actually saved
+                        cursor.execute("SELECT COUNT(*) FROM events WHERE event_id = ?", (event_id,))
+                        count = cursor.fetchone()[0]
+                        self.logger.info(f"Event verification: {count} event(s) found with ID {event_id}")
+                        
+                        # Also check total events in database
+                        cursor.execute("SELECT COUNT(*) FROM events")
+                        total_count = cursor.fetchone()[0]
+                        self.logger.info(f"Total events in database: {total_count}")
                     
                     formatted_time = event_datetime.strftime("%Y-%m-%d at %I:%M %p")
                     self.logger.info(f"Successfully added event to database: {title}")
