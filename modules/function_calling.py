@@ -894,20 +894,18 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
         try:
             self.logger.info("Attempting semantic function detection")
             
-            # Simple prompt for intent detection
-            semantic_prompt = f"""The user said: "{user_input}"
+            # Ultra-simple prompt to avoid LLM confusion
+            semantic_prompt = f"""User request: "{user_input}"
 
-Which function does this request match?
+Is this asking to:
+A) Schedule/add a meeting
+B) Check calendar/schedule  
+C) Ask for time
+D) Remove a meeting
+E) Move a meeting
+F) Something else
 
-Functions available:
-- TIME_QUERY: asking for current time or date
-- CALENDAR_LOOKUP: checking schedule, calendar, meetings, or availability  
-- SCHEDULE_EVENT: adding, scheduling, booking, or creating meetings/events/appointments
-- REMOVE_EVENT: removing, deleting, or canceling meetings/events
-- MOVE_EVENT: moving, rescheduling, or changing meeting times
-- UNKNOWN: doesn't match any function
-
-Respond with just one word: TIME_QUERY, CALENDAR_LOOKUP, SCHEDULE_EVENT, REMOVE_EVENT, MOVE_EVENT, or UNKNOWN"""
+Answer: A, B, C, D, E, or F"""
 
             # Get LLM response
             llm_result = await self.nlp_module.process_text(semantic_prompt)
@@ -915,22 +913,35 @@ Respond with just one word: TIME_QUERY, CALENDAR_LOOKUP, SCHEDULE_EVENT, REMOVE_
                 self.logger.warning("Semantic detection LLM call failed")
                 return None
                 
-            intent = llm_result['response']['text'].strip().upper()
-            self.logger.info(f"LLM detected intent: {intent}")
+            response = llm_result['response']['text'].strip().upper()
+            self.logger.info(f"LLM semantic response: {response}")
             
-            # Map intent back to existing proven functions
-            if intent == "TIME_QUERY":
-                return await self._handle_time_query()
-            elif intent == "CALENDAR_LOOKUP":
-                return await self._handle_calendar_lookup(user_input)
-            elif intent == "SCHEDULE_EVENT":
+            # Extract just the letter from the response
+            intent_letter = None
+            for char in response:
+                if char in ['A', 'B', 'C', 'D', 'E', 'F']:
+                    intent_letter = char
+                    break
+            
+            if not intent_letter:
+                self.logger.info(f"Could not extract intent letter from: {response}")
+                return None
+            
+            self.logger.info(f"Extracted intent: {intent_letter}")
+            
+            # Map letter to function
+            if intent_letter == "A":  # Schedule/add
                 return await self._handle_schedule_event(user_input)
-            elif intent == "REMOVE_EVENT":
+            elif intent_letter == "B":  # Check calendar
+                return await self._handle_calendar_lookup(user_input)
+            elif intent_letter == "C":  # Ask for time
+                return await self._handle_time_query()
+            elif intent_letter == "D":  # Remove meeting
                 return await self._handle_remove_event(user_input)
-            elif intent == "MOVE_EVENT":
+            elif intent_letter == "E":  # Move meeting
                 return await self._handle_move_event(user_input)
-            else:
-                self.logger.info(f"LLM returned UNKNOWN or unrecognized intent: {intent}")
+            else:  # F or other
+                self.logger.info(f"LLM indicated 'something else' or unknown: {intent_letter}")
                 return None
                 
         except Exception as e:
