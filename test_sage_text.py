@@ -119,7 +119,7 @@ class TextTestInterface:
                         response = await self._execute_suggestion(suggestion)
                         print(f"✅ {response}")
                         self.conversation_manager.add_to_history("SAGE", response)
-                        self.conversation_manager.clear_suggestion()
+                        # Don't clear suggestion here - let _execute_suggestion handle it
                         continue
                     elif self.conversation_manager.is_negative_response(user_input):
                         # User declined the suggestion
@@ -200,8 +200,15 @@ class TextTestInterface:
                                 'original_title': original_title,
                                 'original_date': original_date
                             })
-                        return f"Perfect! {response_text}"
+                            # Don't clear the old suggestion since we have a new one
+                            return f"Perfect! {response_text}"
+                        else:
+                            # No more conflicts - clear the suggestion
+                            self.conversation_manager.clear_suggestion()
+                            return f"Perfect! {response_text}"
                     else:
+                        # Error occurred - clear suggestion
+                        self.conversation_manager.clear_suggestion()
                         return f"Sorry, there was an error: {result.get('error', 'Unknown error')}"
             
             return "I executed your request!"
@@ -274,6 +281,7 @@ class TextTestInterface:
                 }
                 
                 self.conversation_manager.store_suggestion(response_text, suggestion_context)
+                print(f"🧠 DEBUG: Stored new suggestion for {suggested_time}")
         except Exception as e:
             pass
 
