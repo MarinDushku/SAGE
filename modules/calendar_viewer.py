@@ -134,12 +134,16 @@ class WeeklyCalendarViewer:
     
     def _create_time_grid(self, parent_frame: ttk.Frame, start_date: datetime, events: List[Dict]):
         """Create the time grid with days and hourly slots"""
-        # Days of the week
+        # Days of the week - Start from Monday of the current week
         days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        # Adjust start_date to Monday of the week
+        weekday = start_date.weekday()  # Monday = 0, Sunday = 6
+        monday_start = start_date - timedelta(days=weekday)
         
         # Create header row with days
         header_frame = tk.Frame(parent_frame, bg='white')
-        header_frame.grid(row=0, column=0, sticky='ew', padx=2, pady=2)
+        header_frame.grid(row=0, column=0, columnspan=8, sticky='ew', padx=2, pady=2)
         
         # Time column header
         time_header = tk.Label(
@@ -153,9 +157,9 @@ class WeeklyCalendarViewer:
         )
         time_header.grid(row=0, column=0, sticky='ew', padx=1)
         
-        # Day headers
+        # Day headers - Show all 7 days
         for i, day in enumerate(days):
-            day_date = start_date + timedelta(days=i)
+            day_date = monday_start + timedelta(days=i)
             day_text = f"{day}\n{day_date.strftime('%m/%d')}"
             
             day_header = tk.Label(
@@ -192,16 +196,16 @@ class WeeklyCalendarViewer:
             )
             time_label.grid(row=row, column=0, sticky='ew', padx=1, pady=1)
             
-            # Day slots
+            # Day slots - Create for all 7 days
             for day_idx in range(7):
-                slot_date = start_date + timedelta(days=day_idx)
+                slot_date = monday_start + timedelta(days=day_idx)
                 slot_datetime = slot_date.replace(hour=hour)
                 
                 # Check if there are events in this slot
                 slot_events = self._get_events_for_slot(events, slot_datetime)
                 
                 if slot_events:
-                    # Create event display
+                    # Occupied slot - RED background
                     event_frame = tk.Frame(parent_frame, bg='#e74c3c', relief=tk.RAISED)
                     event_frame.grid(row=row, column=day_idx+1, sticky='ew', padx=1, pady=1)
                     
@@ -226,11 +230,11 @@ class WeeklyCalendarViewer:
                         )
                         time_info.pack()
                 else:
-                    # Empty slot
+                    # Free slot - GREEN background
                     empty_slot = tk.Label(
                         parent_frame,
                         text="",
-                        bg='white',
+                        bg='#2ecc71',  # Green for free slots
                         relief=tk.RIDGE,
                         width=15,
                         height=2
@@ -245,7 +249,11 @@ class WeeklyCalendarViewer:
         """Get all events for the week starting from start_date"""
         try:
             events = []
-            end_date = start_date + timedelta(days=7)
+            
+            # Adjust to Monday of the current week
+            weekday = start_date.weekday()  # Monday = 0, Sunday = 6
+            monday_start = start_date - timedelta(days=weekday)
+            end_date = monday_start + timedelta(days=7)
             
             # Get database path
             db_path = "data/calendar.db"
@@ -255,7 +263,7 @@ class WeeklyCalendarViewer:
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
                 
-                start_timestamp = start_date.timestamp()
+                start_timestamp = monday_start.timestamp()
                 end_timestamp = end_date.timestamp()
                 
                 cursor.execute("""
