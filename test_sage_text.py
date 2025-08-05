@@ -12,6 +12,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.logger import Logger
+from core.plugin_manager import PluginManager
+from core.config_manager import ConfigManager
+from core.event_bus import EventBus
+from core.cache_manager import CacheManager
 from modules.function_calling import FunctionRegistry, FunctionCallingProcessor
 
 
@@ -22,14 +26,44 @@ class TextTestInterface:
         self.logger = Logger("SAGE-TEST")
         self.main_log = self.logger.get_logger("test")
         
-        # Initialize function calling system
+        # Initialize minimal core components (like main.py does)
+        self.config_manager = ConfigManager("config.yaml")
+        self.config_manager.load_config()
+        
+        self.cache_manager = CacheManager(max_memory_mb=50, default_ttl=3600)
+        self.event_bus = EventBus(max_queue_size=100)
+        
+        # Initialize plugin manager (same as main.py)
+        self.plugin_manager = PluginManager()
+        self.plugin_manager.set_dependencies(
+            event_bus=self.event_bus,
+            config_manager=self.config_manager,
+            cache_manager=self.cache_manager,
+            logger=self.logger
+        )
+        
+    async def initialize(self):
+        """Initialize the plugin system like main.py does"""
+        # Start event bus
+        await self.event_bus.start()
+        
+        # Load calendar module (exactly like main.py)
+        print("🔧 Loading calendar module...")
+        calendar_result = await self.plugin_manager.load_module('calendar')
+        if not calendar_result:
+            self.main_log.warning("Failed to load calendar module, using direct DB access")
+        else:
+            print("✅ Calendar module loaded successfully")
+        
+        # Initialize function calling system (exactly like main.py)
+        calendar_module = self.plugin_manager.get_module('calendar')
         self.function_registry = FunctionRegistry(
             self.logger.get_logger("functions"),
-            None  # No calendar module for now - uses direct DB
+            calendar_module  # Pass calendar module like main.py does
         )
         self.function_processor = FunctionCallingProcessor(
             self.function_registry, 
-            None,  # No NLP module
+            None,  # No NLP module for test
             self.logger.get_logger("function_calling")
         )
         
@@ -37,6 +71,10 @@ class TextTestInterface:
         """Run the text interface"""
         print("🤖 SAGE Text Test Interface")
         print("=" * 50)
+        
+        # Initialize the system first (like main.py)
+        await self.initialize()
+        
         print("Available commands:")
         print("• Ask for time: 'what time is it?'")
         print("• Schedule meeting: 'schedule a meeting for tomorrow at 9am'")
