@@ -9,6 +9,7 @@ import time
 import logging
 import re
 import hashlib
+import calendar as cal
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -43,6 +44,10 @@ class CalendarEvent:
     created_at: float = None
     updated_at: float = None
     tags: List[str] = None
+    event_type: str = "meeting"  # meeting, appointment, task, personal, work, etc.
+    priority: str = "medium"  # low, medium, high, urgent
+    attendees: List[str] = None
+    recurring_pattern: Dict[str, Any] = None  # Advanced recurring options
     
     def __post_init__(self):
         if self.created_at is None:
@@ -51,6 +56,10 @@ class CalendarEvent:
             self.updated_at = time.time()
         if self.tags is None:
             self.tags = []
+        if self.attendees is None:
+            self.attendees = []
+        if self.recurring_pattern is None:
+            self.recurring_pattern = {}
 
 
 @dataclass
@@ -314,8 +323,37 @@ class CalendarModule(BaseModule):
                 )
             """)
             
+            # Migrate database to add new columns if they don't exist
+            self._migrate_database(cursor)
+            
             conn.commit()
             conn.close()
+    
+    def _migrate_database(self, cursor):
+        """Add new columns for enhanced calendar features"""
+        try:
+            # Check if event_type column exists, if not add it
+            cursor.execute("PRAGMA table_info(events)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'event_type' not in columns:
+                cursor.execute("ALTER TABLE events ADD COLUMN event_type TEXT DEFAULT 'meeting'")
+                self.log("Added event_type column to events table")
+            
+            if 'priority' not in columns:
+                cursor.execute("ALTER TABLE events ADD COLUMN priority TEXT DEFAULT 'medium'")
+                self.log("Added priority column to events table")
+            
+            if 'attendees' not in columns:
+                cursor.execute("ALTER TABLE events ADD COLUMN attendees TEXT DEFAULT '[]'")
+                self.log("Added attendees column to events table")
+            
+            if 'recurring_pattern' not in columns:
+                cursor.execute("ALTER TABLE events ADD COLUMN recurring_pattern TEXT DEFAULT '{}'")
+                self.log("Added recurring_pattern column to events table")
+                
+        except Exception as e:
+            self.log(f"Database migration error: {e}", "error")
     
     async def handle_event(self, event: Event) -> Optional[Any]:
         """Handle events from other modules"""
@@ -562,14 +600,15 @@ class CalendarModule(BaseModule):
                 INSERT OR REPLACE INTO events 
                 (event_id, title, description, start_time, end_time, all_day, 
                  location, reminder_minutes, recurring, recurring_until, 
-                 created_at, updated_at, tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 created_at, updated_at, tags, event_type, priority, attendees, recurring_pattern)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 event.event_id, event.title, event.description,
                 event.start_time, event.end_time, event.all_day,
                 event.location, event.reminder_minutes, event.recurring,
                 event.recurring_until, event.created_at, event.updated_at,
-                json.dumps(event.tags)
+                json.dumps(event.tags), event.event_type, event.priority,
+                json.dumps(event.attendees), json.dumps(event.recurring_pattern)
             ))
             
             conn.commit()
@@ -923,4 +962,254 @@ class CalendarModule(BaseModule):
                 'module': 'calendar',
                 'status': 'error',
                 'error': str(e)
+            }
+    
+    # Recurring Events Functionality
+    def parse_recurring_pattern(self, text: str) -> Dict[str, Any]:
+        """Parse recurring pattern from natural language"""
+        text_lower = text.lower()
+        pattern = {}
+        
+        # Daily patterns
+        if 'daily' in text_lower or 'every day' in text_lower:
+            pattern = {
+                'type': 'daily',
+                'interval': 1,
+                'days_of_week': None
+            }
+        
+        # Weekly patterns
+        elif 'weekly' in text_lower or 'every week' in text_lower:
+            pattern = {
+                'type': 'weekly',
+                'interval': 1,
+                'days_of_week': [datetime.now().weekday()]  # Same day each week
+            }
+        
+        # Specific weekdays
+        elif 'every monday' in text_lower:
+            pattern = {'type': 'weekly', 'interval': 1, 'days_of_week': [0]}
+        elif 'every tuesday' in text_lower:
+            pattern = {'type': 'weekly', 'interval': 1, 'days_of_week': [1]}
+        elif 'every wednesday' in text_lower:
+            pattern = {'type': 'weekly', 'interval': 1, 'days_of_week': [2]}
+        elif 'every thursday' in text_lower:
+            pattern = {'type': 'weekly', 'interval': 1, 'days_of_week': [3]}
+        elif 'every friday' in text_lower:
+            pattern = {'type': 'weekly', 'interval': 1, 'days_of_week': [4]}
+        elif 'every saturday' in text_lower:
+            pattern = {'type': 'weekly', 'interval': 1, 'days_of_week': [5]}
+        elif 'every sunday' in text_lower:
+            pattern = {'type': 'weekly', 'interval': 1, 'days_of_week': [6]}
+        
+        # Monthly patterns
+        elif 'monthly' in text_lower or 'every month' in text_lower:
+            pattern = {
+                'type': 'monthly',
+                'interval': 1,
+                'day_of_month': datetime.now().day
+            }
+        
+        # Bi-weekly patterns
+        elif 'bi-weekly' in text_lower or 'every two weeks' in text_lower or 'every other week' in text_lower:
+            pattern = {
+                'type': 'weekly',
+                'interval': 2,
+                'days_of_week': [datetime.now().weekday()]
+            }
+        
+        return pattern
+    
+    async def create_recurring_event(self, base_event: CalendarEvent, pattern: Dict[str, Any], end_date: datetime = None) -> List[str]:
+        """Create recurring events based on pattern"""
+        created_events = []
+        
+        if not pattern:
+            return created_events
+        
+        # Default end date: 1 year from now
+        if not end_date:
+            end_date = datetime.fromtimestamp(base_event.start_time) + timedelta(days=365)
+        
+        current_dt = datetime.fromtimestamp(base_event.start_time)
+        pattern_type = pattern.get('type', 'none')
+        interval = pattern.get('interval', 1)
+        
+        try:
+            if pattern_type == 'daily':
+                # Create daily recurring events
+                while current_dt <= end_date:
+                    if current_dt.timestamp() > base_event.start_time:  # Skip the original event
+                        new_event = self._create_recurring_instance(base_event, current_dt, pattern)
+                        await self._save_event(new_event)
+                        created_events.append(new_event.event_id)
+                    
+                    current_dt += timedelta(days=interval)
+            
+            elif pattern_type == 'weekly':
+                days_of_week = pattern.get('days_of_week', [current_dt.weekday()])
+                
+                # Find next occurrence for each day of week
+                for target_weekday in days_of_week:
+                    temp_dt = current_dt
+                    
+                    # Adjust to target weekday
+                    days_ahead = target_weekday - temp_dt.weekday()
+                    if days_ahead < 0:
+                        days_ahead += 7
+                    temp_dt += timedelta(days=days_ahead)
+                    
+                    # Create weekly instances
+                    while temp_dt <= end_date:
+                        if temp_dt.timestamp() > base_event.start_time:
+                            new_event = self._create_recurring_instance(base_event, temp_dt, pattern)
+                            await self._save_event(new_event)
+                            created_events.append(new_event.event_id)
+                        
+                        temp_dt += timedelta(weeks=interval)
+            
+            elif pattern_type == 'monthly':
+                day_of_month = pattern.get('day_of_month', current_dt.day)
+                
+                while current_dt <= end_date:
+                    try:
+                        # Try to create event on same day of month
+                        next_month_dt = current_dt.replace(day=day_of_month)
+                        if next_month_dt.month != current_dt.month:
+                            # Move to next month
+                            if current_dt.month == 12:
+                                next_month_dt = current_dt.replace(year=current_dt.year + 1, month=1, day=day_of_month)
+                            else:
+                                next_month_dt = current_dt.replace(month=current_dt.month + 1, day=day_of_month)
+                        
+                        if next_month_dt.timestamp() > base_event.start_time and next_month_dt <= end_date:
+                            new_event = self._create_recurring_instance(base_event, next_month_dt, pattern)
+                            await self._save_event(new_event)
+                            created_events.append(new_event.event_id)
+                        
+                        # Move to next month
+                        if current_dt.month == 12:
+                            current_dt = current_dt.replace(year=current_dt.year + 1, month=1)
+                        else:
+                            current_dt = current_dt.replace(month=current_dt.month + 1)
+                            
+                    except ValueError:  # Day doesn't exist in month (e.g., Feb 31st)
+                        # Use last day of month instead
+                        if current_dt.month == 12:
+                            current_dt = current_dt.replace(year=current_dt.year + 1, month=1)
+                        else:
+                            current_dt = current_dt.replace(month=current_dt.month + 1)
+                        
+                        last_day = cal.monthrange(current_dt.year, current_dt.month)[1]
+                        next_month_dt = current_dt.replace(day=min(day_of_month, last_day))
+                        
+                        if next_month_dt.timestamp() > base_event.start_time and next_month_dt <= end_date:
+                            new_event = self._create_recurring_instance(base_event, next_month_dt, pattern)
+                            await self._save_event(new_event)
+                            created_events.append(new_event.event_id)
+        
+        except Exception as e:
+            self.log(f"Error creating recurring events: {e}", "error")
+        
+        return created_events
+    
+    def _create_recurring_instance(self, base_event: CalendarEvent, occurrence_dt: datetime, pattern: Dict[str, Any]) -> CalendarEvent:
+        """Create a single instance of a recurring event"""
+        import hashlib
+        
+        # Calculate duration
+        duration = base_event.end_time - base_event.start_time
+        
+        # Create new event ID
+        instance_id = hashlib.md5(f"{base_event.event_id}_{occurrence_dt.timestamp()}".encode()).hexdigest()[:12]
+        
+        new_event = CalendarEvent(
+            event_id=instance_id,
+            title=base_event.title,
+            description=f"{base_event.description} (Recurring)",
+            start_time=occurrence_dt.timestamp(),
+            end_time=occurrence_dt.timestamp() + duration,
+            all_day=base_event.all_day,
+            location=base_event.location,
+            reminder_minutes=base_event.reminder_minutes,
+            recurring=base_event.recurring,
+            recurring_until=base_event.recurring_until,
+            tags=base_event.tags.copy() if base_event.tags else [],
+            event_type=base_event.event_type,
+            priority=base_event.priority,
+            attendees=base_event.attendees.copy() if base_event.attendees else [],
+            recurring_pattern=pattern
+        )
+        
+        return new_event
+    
+    async def handle_recurring_request(self, text: str) -> Dict[str, Any]:
+        """Handle requests for recurring events"""
+        try:
+            # Parse the recurring pattern
+            pattern = self.parse_recurring_pattern(text)
+            
+            if not pattern:
+                return {
+                    'success': False,
+                    'error': 'Could not parse recurring pattern from your request',
+                    'type': 'parse_error'
+                }
+            
+            # Parse the base event details
+            event_title = self._extract_event_title(text)
+            event_datetime = self.parser.parse_datetime(text)
+            
+            if not event_datetime:
+                return {
+                    'success': False,
+                    'error': 'Could not parse date/time from your request',
+                    'type': 'parse_error'
+                }
+            
+            # Determine event type from text
+            event_type = 'meeting'  # default
+            if 'standup' in text.lower() or 'daily' in text.lower():
+                event_type = 'task'
+            elif 'appointment' in text.lower():
+                event_type = 'appointment'
+            elif 'personal' in text.lower():
+                event_type = 'personal'
+            
+            # Create base event
+            event_id = hashlib.md5(f"{event_title}_{event_datetime.timestamp()}".encode()).hexdigest()[:12]
+            end_datetime = event_datetime + timedelta(hours=1)  # Default 1 hour
+            
+            base_event = CalendarEvent(
+                event_id=event_id,
+                title=event_title,
+                description=f"Recurring event created from: {text}",
+                start_time=event_datetime.timestamp(),
+                end_time=end_datetime.timestamp(),
+                event_type=event_type,
+                recurring=pattern.get('type', 'none'),
+                recurring_pattern=pattern
+            )
+            
+            # Save the base event
+            await self._save_event(base_event)
+            
+            # Create recurring instances
+            recurring_ids = await self.create_recurring_event(base_event, pattern)
+            
+            return {
+                'success': True,
+                'message': f"Created recurring '{event_title}' starting {event_datetime.strftime('%A, %B %d at %I:%M %p')} ({len(recurring_ids) + 1} total instances)",
+                'event_id': event_id,
+                'recurring_instances': len(recurring_ids),
+                'pattern': pattern,
+                'type': 'recurring_event_created'
+            }
+            
+        except Exception as e:
+            self.log(f"Error handling recurring request: {e}", "error")
+            return {
+                'success': False,
+                'error': f"Failed to create recurring event: {str(e)}",
+                'type': 'recurring_error'
             }

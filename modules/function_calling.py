@@ -163,6 +163,51 @@ class FunctionRegistry:
             parameters={},
             handler=self._show_weekly_calendar
         )
+        
+        self.register_function(
+            "show_monthly_calendar",
+            description="Show visual monthly calendar in a GUI window with color-coded events",
+            parameters={},
+            handler=self._show_monthly_calendar
+        )
+        
+        self.register_function(
+            "create_recurring_event",
+            description="Create recurring events (daily, weekly, monthly patterns)",
+            parameters={
+                "title": {
+                    "type": "string",
+                    "description": "Event title/name",
+                    "required": True
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Recurring pattern like 'daily', 'weekly', 'every Monday', 'monthly'",
+                    "required": True
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Start date (YYYY-MM-DD or relative like 'tomorrow')",
+                    "required": True
+                },
+                "time": {
+                    "type": "string",
+                    "description": "Start time (HH:MM format or relative like '9am')",
+                    "required": False
+                },
+                "duration": {
+                    "type": "string",
+                    "description": "Event duration like '1 hour', '30 minutes'",
+                    "required": False
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Event location",
+                    "required": False
+                }
+            },
+            handler=self._create_recurring_event
+        )
     
     def register_function(self, name: str, description: str, parameters: Dict, handler: Callable):
         """Register a new function that the LLM can call"""
@@ -536,6 +581,63 @@ class FunctionRegistry:
         except Exception as e:
             self.logger.error(f"Error showing weekly calendar: {e}")
             return f"Error opening weekly calendar: {str(e)}"
+    
+    def _show_monthly_calendar(self) -> str:
+        """Show monthly calendar GUI"""
+        try:
+            from modules.calendar_viewer import show_monthly_calendar
+            result = show_monthly_calendar(self.calendar_module)
+            
+            if result.get('success'):
+                return result.get('result', 'Monthly calendar opened.')
+            else:
+                return f"Failed to open calendar: {result.get('error', 'Unknown error')}"
+                
+        except ImportError:
+            return "Calendar viewer module not available."
+        except Exception as e:
+            self.logger.error(f"Error showing monthly calendar: {e}")
+            return f"Error opening monthly calendar: {str(e)}"
+    
+    async def _create_recurring_event(self, title: str, pattern: str, date: str, 
+                                    time: Optional[str] = None, duration: Optional[str] = None, 
+                                    location: Optional[str] = None) -> str:
+        """Create recurring events"""
+        try:
+            if not self.calendar_module:
+                return "Calendar module not available."
+            
+            # Build the natural language request
+            request_parts = [title]
+            
+            # Add pattern to the request
+            request_parts.append(pattern)
+            
+            # Add date and time
+            if date:
+                request_parts.append(date)
+            if time:
+                request_parts.append(f"at {time}")
+                
+            # Add duration and location if provided
+            if duration:
+                request_parts.append(f"for {duration}")
+            if location:
+                request_parts.append(f"at {location}")
+            
+            request_text = " ".join(request_parts)
+            
+            # Use the calendar module's recurring event handler
+            result = await self.calendar_module.handle_recurring_request(request_text)
+            
+            if result.get('success'):
+                return result.get('message', f'Created recurring event: {title}')
+            else:
+                return f"Failed to create recurring event: {result.get('error', 'Unknown error')}"
+                
+        except Exception as e:
+            self.logger.error(f"Error creating recurring event: {e}")
+            return f"Error creating recurring event: {str(e)}"
     
     async def _find_next_available_hour(self, preferred_datetime: datetime, cursor) -> Optional[datetime]:
         """Find the next available hour slot starting from preferred time"""
@@ -926,6 +1028,10 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
                 return await self._handle_remove_event(user_input)
             elif simple_semantic_result == "weekly_calendar":
                 return await self._handle_weekly_calendar()
+            elif simple_semantic_result == "monthly_calendar":
+                return await self._handle_monthly_calendar()
+            elif simple_semantic_result == "recurring_event":
+                return await self._handle_recurring_event(user_input)
         
         # Layer 2: Try LLM semantic detection
         if self.nlp_module:
@@ -988,6 +1094,21 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
             self.logger.info("Simple semantic detection: weekly calendar view")
             return "weekly_calendar"
         
+        # Check for monthly calendar view requests
+        monthly_phrases = [
+            'monthly schedule', 'month schedule', 'monthly calendar', 'month calendar',
+            'monthly view', 'month view', 'show monthly', 'calendar monthly',
+            'calendar for the month', 'monthly scheduel'
+        ]
+        
+        has_monthly = any(word in user_lower for word in ['month', 'monthly'])
+        
+        # Monthly calendar detection
+        if (any(phrase in user_lower for phrase in monthly_phrases) or 
+            (has_monthly and has_calendar_context)):
+            self.logger.info("Simple semantic detection: monthly calendar view")
+            return "monthly_calendar"
+        
         # Check for calendar lookups (show/check existing schedule)
         lookup_phrases = [
             'what\'s on my', 'whats on my', 'show me my', 'show me what',
@@ -1000,6 +1121,27 @@ Respond naturally and conversationally. Keep your response brief and friendly.""
             any(query in user_lower for query in calendar_queries)):
             self.logger.info("Simple semantic detection: calendar lookup")
             return "calendar_lookup"
+        
+        # Check for recurring event requests FIRST (before general scheduling)
+        recurring_patterns = [
+            'daily', 'weekly', 'monthly', 'every day', 'every week', 'every month',
+            'every monday', 'every tuesday', 'every wednesday', 'every thursday',
+            'every friday', 'every saturday', 'every sunday', 'recurring',
+            'repeat', 'repeating', 'bi-weekly', 'every other week'
+        ]
+        
+        recurring_phrases = [
+            'daily standup', 'weekly meeting', 'monthly review', 'team standup',
+            'recurring meeting', 'repeating event', 'every day at', 'every week at',
+            'weekly team meeting', 'daily scrum', 'standup every', 'meeting every'
+        ]
+        
+        has_recurring_word = any(word in user_lower for word in recurring_patterns)
+        has_recurring_phrase = any(phrase in user_lower for phrase in recurring_phrases)
+        
+        if has_recurring_word or has_recurring_phrase:
+            self.logger.info("Simple semantic detection: recurring event")
+            return "recurring_event"
         
         # More specific scheduling patterns (only clear scheduling intents)
         explicit_schedule_phrases = [
@@ -1239,6 +1381,109 @@ Answer: A, B, C, D, E, F, or G"""
                 "success": True,
                 "type": "semantic_function",
                 "response": f"Unable to open weekly calendar: {result.get('error', 'Unknown error')}"
+            }
+    
+    async def _handle_monthly_calendar(self) -> Dict[str, Any]:
+        """Handle monthly calendar view request"""
+        result = await self.function_registry.execute_function("show_monthly_calendar", {})
+        if result['success']:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": result['result']
+            }
+        else:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": f"Unable to open monthly calendar: {result.get('error', 'Unknown error')}"
+            }
+    
+    async def _handle_recurring_event(self, user_input: str) -> Dict[str, Any]:
+        """Handle recurring event creation request"""
+        user_lower = user_input.lower()
+        
+        # Extract parameters from user input
+        title = "Recurring Event"
+        pattern = "weekly"  # default
+        date_param = "today"
+        time_param = None
+        
+        # Extract pattern
+        if "daily" in user_lower:
+            pattern = "daily"
+        elif "weekly" in user_lower:
+            pattern = "weekly"
+        elif "monthly" in user_lower:
+            pattern = "monthly"
+        elif "every monday" in user_lower:
+            pattern = "every Monday"
+        elif "every tuesday" in user_lower:
+            pattern = "every Tuesday"
+        elif "every wednesday" in user_lower:
+            pattern = "every Wednesday"
+        elif "every thursday" in user_lower:
+            pattern = "every Thursday"
+        elif "every friday" in user_lower:
+            pattern = "every Friday"
+        elif "every saturday" in user_lower:
+            pattern = "every Saturday"
+        elif "every sunday" in user_lower:
+            pattern = "every Sunday"
+        elif "bi-weekly" in user_lower or "every other week" in user_lower:
+            pattern = "bi-weekly"
+        
+        # Extract title
+        if "standup" in user_lower:
+            title = "Daily Standup" if "daily" in user_lower else "Standup"
+        elif "meeting" in user_lower:
+            title = "Weekly Meeting" if "weekly" in user_lower else "Meeting"
+        elif "scrum" in user_lower:
+            title = "Daily Scrum" if "daily" in user_lower else "Scrum"
+        elif "review" in user_lower:
+            title = "Monthly Review" if "monthly" in user_lower else "Review"
+        
+        # Extract date and time
+        if "tomorrow" in user_lower:
+            date_param = "tomorrow"
+        elif "today" in user_lower:
+            date_param = "today"
+        
+        # Extract time if mentioned
+        import re
+        time_patterns = [
+            r'(\d{1,2})\s*(am|pm)',
+            r'(\d{1,2}):(\d{2})\s*(am|pm)', 
+            r'(\d{1,2})\s*o\'?clock',
+            r'at\s+(\d{1,2})',
+            r'(\d{1,2})\s*a\.?m\.?',
+            r'(\d{1,2})\s*p\.?m\.?'
+        ]
+        
+        for time_pattern in time_patterns:
+            match = re.search(time_pattern, user_lower)
+            if match:
+                time_param = match.group(0)
+                break
+        
+        result = await self.function_registry.execute_function("create_recurring_event", {
+            "title": title,
+            "pattern": pattern,
+            "date": date_param,
+            "time": time_param
+        })
+        
+        if result['success']:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": str(result['result'])
+            }
+        else:
+            return {
+                "success": True,
+                "type": "semantic_function",
+                "response": f"Unable to create recurring event: {result.get('error', 'Unknown error')}"
             }
 
     async def _fallback_processing(self, user_input: str) -> Dict[str, Any]:
