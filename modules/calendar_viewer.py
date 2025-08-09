@@ -1,10 +1,11 @@
 """
-Visual Calendar Viewer for SAGE
-Creates a GUI window showing weekly schedule in a time-grid format
+Modern Visual Calendar Viewer for SAGE
+Creates a beautiful GUI window showing weekly/monthly schedule with modern design
+Inspired by Google Calendar and Outlook Calendar aesthetics
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, font
 import sqlite3
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
@@ -14,12 +15,49 @@ import calendar as cal  # Rename to avoid conflict with modules/calendar package
 
 
 class WeeklyCalendarViewer:
-    """GUI window for displaying weekly calendar in a grid format"""
+    """Modern GUI window for displaying weekly calendar with beautiful design"""
     
     def __init__(self, calendar_module=None):
         self.calendar_module = calendar_module
         self.window = None
-        self.tree = None
+        self.main_frame = None
+        self.calendar_canvas = None
+        self.current_start_date = None
+        
+        # Modern color palette inspired by Google Calendar
+        self.colors = {
+            'primary': '#1a73e8',        # Google Blue
+            'primary_light': '#e8f0fe',   # Light blue background
+            'secondary': '#34a853',       # Google Green
+            'background': '#ffffff',      # Pure white
+            'surface': '#f8f9fa',         # Light gray surface
+            'border': '#e0e0e0',         # Light border
+            'text_primary': '#202124',    # Dark gray text
+            'text_secondary': '#5f6368',  # Medium gray text
+            'hover': '#f1f3f4',          # Hover background
+            'shadow': '#00000010',        # Subtle shadow
+        }
+        
+        # Modern event colors (softer, more appealing)
+        self.event_colors = {
+            'meeting': {'bg': '#1a73e8', 'text': '#ffffff', 'light': '#e8f0fe'},      # Blue
+            'appointment': {'bg': '#9c27b0', 'text': '#ffffff', 'light': '#f3e5f5'},  # Purple
+            'task': {'bg': '#ff9800', 'text': '#ffffff', 'light': '#fff3e0'},         # Orange
+            'personal': {'bg': '#4caf50', 'text': '#ffffff', 'light': '#e8f5e8'},     # Green
+            'work': {'bg': '#f44336', 'text': '#ffffff', 'light': '#ffebee'},         # Red
+            'social': {'bg': '#00bcd4', 'text': '#ffffff', 'light': '#e0f2f1'},       # Cyan
+            'health': {'bg': '#8bc34a', 'text': '#ffffff', 'light': '#f1f8e9'},       # Light green
+            'default': {'bg': '#757575', 'text': '#ffffff', 'light': '#f5f5f5'}       # Gray
+        }
+        
+        # Modern fonts
+        self.fonts = {
+            'title': ('Segoe UI', 20, 'bold'),
+            'subtitle': ('Segoe UI', 12, 'bold'), 
+            'body': ('Segoe UI', 10, 'normal'),
+            'small': ('Segoe UI', 9, 'normal'),
+            'time': ('Segoe UI', 9, 'bold')
+        }
         
     def show_weekly_schedule(self, start_date: datetime = None) -> bool:
         """Display weekly calendar starting from given date (default: today)"""
@@ -41,98 +79,717 @@ class WeeklyCalendarViewer:
             return False
     
     def _create_calendar_window(self, start_date: datetime):
-        """Create and display the calendar window"""
+        """Create and display the modern calendar window"""
         try:
-            # Create main window
+            self.current_start_date = start_date
+            
+            # Create main window with modern styling
             self.window = tk.Tk()
-            self.window.title("SAGE - Weekly Schedule")
-            self.window.geometry("1000x700")
-            self.window.configure(bg='#f0f0f0')
+            self.window.title("SAGE Calendar - Weekly View")
+            self.window.geometry("1400x900")
+            self.window.configure(bg=self.colors['background'])
+            self.window.minsize(1200, 700)
             
-            # Create header with week navigation
-            self._create_header(start_date)
+            # Remove window decorations for modern look (optional)
+            # self.window.overrideredirect(False)
             
-            # Create the calendar grid
-            self._create_calendar_grid(start_date)
+            # Configure modern styling
+            style = ttk.Style()
+            style.theme_use('clam')
+            
+            # Create main container
+            self.main_frame = tk.Frame(self.window, bg=self.colors['background'])
+            self.main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+            
+            # Create header with navigation
+            self._create_modern_header()
+            
+            # Create toolbar with quick actions
+            self._create_toolbar()
+            
+            # Create the modern calendar grid
+            self._create_modern_calendar_grid()
+            
+            # Add subtle shadow effect to window
+            self.window.wm_attributes("-topmost", False)
+            
+            # Center window on screen
+            self._center_window()
             
             # Start the GUI event loop
             self.window.mainloop()
             
         except Exception as e:
-            print(f"Error creating calendar window: {e}")
+            print(f"Error creating modern calendar window: {e}")
     
-    def _create_header(self, start_date: datetime):
-        """Create header with week navigation and title"""
-        header_frame = tk.Frame(self.window, bg='#2c3e50', height=60)
+    def _center_window(self):
+        """Center the window on screen"""
+        self.window.update_idletasks()
+        width = self.window.winfo_width()
+        height = self.window.winfo_height()
+        pos_x = (self.window.winfo_screenwidth() // 2) - (width // 2)
+        pos_y = (self.window.winfo_screenheight() // 2) - (height // 2)
+        self.window.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    
+    def _create_modern_header(self):
+        """Create modern header with elegant navigation"""
+        # Header container with subtle shadow
+        header_frame = tk.Frame(
+            self.main_frame, 
+            bg=self.colors['background'], 
+            height=80
+        )
+        header_frame.pack(fill=tk.X, padx=20, pady=(20, 0))
+        header_frame.pack_propagate(False)
+        
+        # Add subtle separator line
+        separator = tk.Frame(header_frame, bg=self.colors['border'], height=1)
+        separator.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+        
+        # Title section
+        title_frame = tk.Frame(header_frame, bg=self.colors['background'])
+        title_frame.pack(side=tk.LEFT, fill=tk.Y)
+        
+        # Calculate week range
+        end_date = self.current_start_date + timedelta(days=6)
+        
+        # Main title
+        if self.current_start_date.month == end_date.month:
+            title_text = f"{self.current_start_date.strftime('%B %d')} – {end_date.strftime('%d, %Y')}"
+        else:
+            title_text = f"{self.current_start_date.strftime('%B %d')} – {end_date.strftime('%B %d, %Y')}"
+            
+        title_label = tk.Label(
+            title_frame,
+            text=title_text,
+            font=self.fonts['title'],
+            fg=self.colors['text_primary'],
+            bg=self.colors['background'],
+            anchor='w'
+        )
+        title_label.pack(anchor='w', pady=(10, 5))
+        
+        # Subtitle
+        today = datetime.now()
+        if self._is_current_week(self.current_start_date, today):
+            subtitle_text = "This Week"
+        else:
+            days_diff = (self.current_start_date - today).days
+            if days_diff > 0:
+                subtitle_text = f"{days_diff // 7} weeks ahead"
+            else:
+                subtitle_text = f"{abs(days_diff) // 7} weeks ago"
+        
+        subtitle_label = tk.Label(
+            title_frame,
+            text=subtitle_text,
+            font=self.fonts['small'],
+            fg=self.colors['text_secondary'],
+            bg=self.colors['background'],
+            anchor='w'
+        )
+        subtitle_label.pack(anchor='w')
+        
+        # Navigation section
+        nav_frame = tk.Frame(header_frame, bg=self.colors['background'])
+        nav_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0))
+        
+        # Navigation buttons with modern styling
+        self._create_nav_button(nav_frame, "‹", "Previous Week", lambda: self._navigate_week(-7), 'left')
+        self._create_nav_button(nav_frame, "Today", "Go to Today", self._go_to_today, 'center')
+        self._create_nav_button(nav_frame, "›", "Next Week", lambda: self._navigate_week(7), 'right')
+    
+    def _is_current_week(self, week_start, today):
+        """Check if the given week contains today"""
+        week_end = week_start + timedelta(days=6)
+        return week_start.date() <= today.date() <= week_end.date()
+    
+    def _create_nav_button(self, parent, text, tooltip, command, position):
+        """Create a modern navigation button"""
+        btn = tk.Button(
+            parent,
+            text=text,
+            font=self.fonts['body'] if text == "Today" else ('Segoe UI', 14, 'normal'),
+            fg=self.colors['text_primary'],
+            bg=self.colors['surface'],
+            border=0,
+            relief='flat',
+            cursor='hand2',
+            padx=15 if text == "Today" else 10,
+            pady=8,
+            command=command
+        )
+        
+        # Add hover effects
+        def on_enter(e):
+            btn.config(bg=self.colors['hover'])
+        def on_leave(e):
+            btn.config(bg=self.colors['surface'])
+        
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        
+        if position == 'left':
+            btn.pack(side=tk.LEFT, padx=(0, 2))
+        elif position == 'right':
+            btn.pack(side=tk.LEFT, padx=(2, 0))
+        else:
+            btn.pack(side=tk.LEFT, padx=2)
+    
+    def _create_toolbar(self):
+        """Create modern toolbar with quick actions"""
+        toolbar_frame = tk.Frame(self.main_frame, bg=self.colors['surface'], height=50)
+        toolbar_frame.pack(fill=tk.X, padx=20, pady=(15, 0))
+        toolbar_frame.pack_propagate(False)
+        
+        # Quick actions section
+        actions_frame = tk.Frame(toolbar_frame, bg=self.colors['surface'])
+        actions_frame.pack(side=tk.LEFT, fill=tk.Y, pady=10)
+        
+        # Add event button
+        add_btn = tk.Button(
+            actions_frame,
+            text="+ Add Event",
+            font=self.fonts['body'],
+            fg='white',
+            bg=self.colors['primary'],
+            border=0,
+            relief='flat',
+            cursor='hand2',
+            padx=20,
+            pady=6,
+            command=self._add_event_dialog
+        )
+        add_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # View toggle buttons
+        view_frame = tk.Frame(toolbar_frame, bg=self.colors['surface'])
+        view_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+        
+        # Week view button (active)
+        week_btn = tk.Button(
+            view_frame,
+            text="Week",
+            font=self.fonts['small'],
+            fg='white',
+            bg=self.colors['primary'],
+            border=0,
+            relief='flat',
+            cursor='hand2',
+            padx=15,
+            pady=6
+        )
+        week_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Month view button
+        month_btn = tk.Button(
+            view_frame,
+            text="Month",
+            font=self.fonts['small'],
+            fg=self.colors['text_secondary'],
+            bg=self.colors['background'],
+            border=0,
+            relief='flat',
+            cursor='hand2',
+            padx=15,
+            pady=6,
+            command=self._switch_to_month_view
+        )
+        month_btn.pack(side=tk.LEFT, padx=2)
+    
+    def _create_modern_calendar_grid(self):
+        """Create the modern calendar grid with beautiful styling"""
+        # Main calendar container
+        calendar_container = tk.Frame(self.main_frame, bg=self.colors['background'])
+        calendar_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 20))
+        
+        # Create scrollable canvas with modern styling
+        self.calendar_canvas = tk.Canvas(
+            calendar_container, 
+            bg=self.colors['background'],
+            highlightthickness=0,
+            border=0
+        )
+        
+        # Modern scrollbar
+        scrollbar = ttk.Scrollbar(
+            calendar_container, 
+            orient="vertical", 
+            command=self.calendar_canvas.yview
+        )
+        
+        # Scrollable frame
+        scrollable_frame = tk.Frame(self.calendar_canvas, bg=self.colors['background'])
+        
+        # Configure scrolling
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
+        )
+        
+        self.calendar_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        self.calendar_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Get events for the week
+        events = self._get_week_events(self.current_start_date)
+        
+        # Create the modern time grid
+        self._create_modern_time_grid(scrollable_frame, events)
+        
+        # Pack components
+        self.calendar_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Modern mouse wheel scrolling
+        def _on_mousewheel(event):
+            self.calendar_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        # Bind to multiple widgets for better UX
+        widgets = [self.calendar_canvas, self.window]
+        for widget in widgets:
+            widget.bind_all("<MouseWheel>", _on_mousewheel)
+    
+    def _create_modern_time_grid(self, parent_frame, events):
+        """Create modern time grid with Google Calendar styling"""
+        # Adjust to Monday of the current week
+        weekday = self.current_start_date.weekday()
+        monday_start = self.current_start_date - timedelta(days=weekday)
+        
+        # Days of the week
+        weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        # Create header with day names and dates
+        header_frame = tk.Frame(parent_frame, bg=self.colors['background'], height=60)
         header_frame.pack(fill=tk.X, pady=(0, 10))
         header_frame.pack_propagate(False)
         
-        # Week title
-        end_date = start_date + timedelta(days=6)
-        title_text = f"Weekly Schedule: {start_date.strftime('%B %d')} - {end_date.strftime('%B %d, %Y')}"
+        # Configure grid weights
+        header_frame.columnconfigure(0, weight=0)  # Time column
+        for i in range(1, 8):  # Day columns
+            header_frame.columnconfigure(i, weight=1)
         
-        title_label = tk.Label(
+        # Time column header (empty)
+        time_header_space = tk.Frame(
             header_frame, 
-            text=title_text,
-            font=('Arial', 16, 'bold'),
-            fg='white',
-            bg='#2c3e50'
+            bg=self.colors['background'],
+            width=80
         )
-        title_label.pack(expand=True)
+        time_header_space.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
         
-        # Navigation buttons (for future enhancement)
-        nav_frame = tk.Frame(header_frame, bg='#2c3e50')
-        nav_frame.pack(side=tk.BOTTOM, pady=5)
+        # Day headers with modern styling
+        today = datetime.now().date()
+        for i, day_name in enumerate(weekdays):
+            day_date = monday_start + timedelta(days=i)
+            is_today = day_date.date() == today
+            
+            # Day header frame
+            day_header_frame = tk.Frame(
+                header_frame,
+                bg=self.colors['primary_light'] if is_today else self.colors['background'],
+                relief='flat',
+                bd=0
+            )
+            day_header_frame.grid(row=0, column=i+1, sticky='ew', padx=2, pady=5)
+            
+            # Day name
+            day_label = tk.Label(
+                day_header_frame,
+                text=day_name[:3].upper(),  # MON, TUE, etc.
+                font=('Segoe UI', 9, 'bold'),
+                fg=self.colors['primary'] if is_today else self.colors['text_secondary'],
+                bg=self.colors['primary_light'] if is_today else self.colors['background']
+            )
+            day_label.pack(pady=(8, 2))
+            
+            # Date number
+            date_label = tk.Label(
+                day_header_frame,
+                text=str(day_date.day),
+                font=('Segoe UI', 16, 'bold'),
+                fg=self.colors['primary'] if is_today else self.colors['text_primary'],
+                bg=self.colors['primary_light'] if is_today else self.colors['background']
+            )
+            date_label.pack(pady=(0, 8))
         
-        prev_btn = tk.Button(
-            nav_frame,
-            text="← Previous Week",
-            font=('Arial', 10),
-            command=lambda: self._navigate_week(start_date, -7)
-        )
-        prev_btn.pack(side=tk.LEFT, padx=5)
+        # Main grid frame
+        grid_frame = tk.Frame(parent_frame, bg=self.colors['background'])
+        grid_frame.pack(fill=tk.BOTH, expand=True)
         
-        next_btn = tk.Button(
-            nav_frame,
-            text="Next Week →",
-            font=('Arial', 10),
-            command=lambda: self._navigate_week(start_date, 7)
-        )
-        next_btn.pack(side=tk.RIGHT, padx=5)
+        # Configure grid weights
+        grid_frame.columnconfigure(0, weight=0)  # Time column
+        for i in range(1, 8):  # Day columns
+            grid_frame.columnconfigure(i, weight=1)
+        
+        # Create time slots (6 AM to 10 PM)
+        for hour in range(6, 22):
+            self._create_time_row(grid_frame, hour, monday_start, events)
     
-    def _create_calendar_grid(self, start_date: datetime):
-        """Create the main calendar grid with time slots and events"""
-        # Main container
-        main_frame = tk.Frame(self.window, bg='#f0f0f0')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+    def _create_time_row(self, parent, hour, monday_start, events):
+        """Create a single time row with modern styling"""
+        row = hour - 6
         
-        # Create scrollable canvas
-        canvas = tk.Canvas(main_frame, bg='white')
-        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        # Time label with modern styling
+        time_frame = tk.Frame(
+            parent,
+            bg=self.colors['background'],
+            width=80
         )
+        time_frame.grid(row=row, column=0, sticky='nsew', padx=(0, 10))
+        time_frame.grid_propagate(False)
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        # Format time
+        if hour == 0:
+            time_text = "12 AM"
+        elif hour < 12:
+            time_text = f"{hour} AM"
+        elif hour == 12:
+            time_text = "12 PM"
+        else:
+            time_text = f"{hour-12} PM"
         
-        # Get events for the week
-        events = self._get_week_events(start_date)
+        time_label = tk.Label(
+            time_frame,
+            text=time_text,
+            font=self.fonts['small'],
+            fg=self.colors['text_secondary'],
+            bg=self.colors['background'],
+            anchor='ne'
+        )
+        time_label.pack(side=tk.RIGHT, padx=10, pady=5)
         
-        # Create the grid
-        self._create_time_grid(scrollable_frame, start_date, events)
+        # Create day slots with alternating background
+        bg_color = self.colors['background'] if row % 2 == 0 else self.colors['surface']
         
-        # Pack scrollable components
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        for day_idx in range(7):
+            slot_date = monday_start + timedelta(days=day_idx)
+            slot_datetime = slot_date.replace(hour=hour)
+            
+            # Get events for this time slot
+            slot_events = self._get_events_for_slot(events, slot_datetime)
+            
+            if slot_events:
+                self._create_event_cell(parent, row, day_idx + 1, slot_events, bg_color)
+            else:
+                self._create_empty_cell(parent, row, day_idx + 1, bg_color, slot_datetime)
+    
+    def _create_event_cell(self, parent, row, col, events, bg_color):
+        """Create a cell with events using modern styling"""
+        cell_frame = tk.Frame(
+            parent,
+            bg=bg_color,
+            relief='flat',
+            bd=0,
+            height=60
+        )
+        cell_frame.grid(row=row, column=col, sticky='ew', padx=2, pady=1)
+        cell_frame.grid_propagate(False)
         
-        # Bind mouse wheel to canvas
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        for event in events[:2]:  # Show max 2 events per slot
+            self._create_event_block(cell_frame, event)
+        
+        # Show "+N more" if more than 2 events
+        if len(events) > 2:
+            more_label = tk.Label(
+                cell_frame,
+                text=f"+{len(events) - 2} more",
+                font=('Segoe UI', 8),
+                fg=self.colors['text_secondary'],
+                bg=bg_color,
+                cursor='hand2'
+            )
+            more_label.pack(anchor='w', padx=5, pady=2)
+    
+    def _create_event_block(self, parent, event):
+        """Create a beautiful event block"""
+        event_type = event.get('event_type', 'meeting')
+        colors = self.event_colors.get(event_type, self.event_colors['default'])
+        
+        # Event frame with rounded corners effect
+        event_frame = tk.Frame(
+            parent,
+            bg=colors['bg'],
+            relief='flat',
+            bd=0,
+            cursor='hand2'
+        )
+        event_frame.pack(fill=tk.X, padx=3, pady=1)
+        
+        # Event title
+        title_label = tk.Label(
+            event_frame,
+            text=event['title'][:25] + ('...' if len(event['title']) > 25 else ''),
+            font=('Segoe UI', 9, 'bold'),
+            fg=colors['text'],
+            bg=colors['bg'],
+            anchor='w'
+        )
+        title_label.pack(anchor='w', padx=6, pady=(3, 1))
+        
+        # Event time
+        time_label = tk.Label(
+            event_frame,
+            text=event['time_str'],
+            font=('Segoe UI', 8),
+            fg=colors['text'],
+            bg=colors['bg'],
+            anchor='w'
+        )
+        time_label.pack(anchor='w', padx=6, pady=(0, 3))
+        
+        # Add hover effects and click binding
+        def on_hover_enter(e):
+            event_frame.configure(relief='raised', bd=1)
+        
+        def on_hover_leave(e):
+            event_frame.configure(relief='flat', bd=0)
+        
+        def on_click(e):
+            self._show_event_details(event)
+        
+        # Bind events to all child widgets
+        for widget in [event_frame, title_label, time_label]:
+            widget.bind("<Enter>", on_hover_enter)
+            widget.bind("<Leave>", on_hover_leave)
+            widget.bind("<Button-1>", on_click)
+    
+    def _create_empty_cell(self, parent, row, col, bg_color, slot_datetime):
+        """Create an empty time slot with hover effect"""
+        cell_frame = tk.Frame(
+            parent,
+            bg=bg_color,
+            relief='flat',
+            bd=0,
+            height=60,
+            cursor='crosshair'
+        )
+        cell_frame.grid(row=row, column=col, sticky='ew', padx=2, pady=1)
+        cell_frame.grid_propagate(False)
+        
+        # Add subtle border on alternate rows
+        if row % 2 == 1:
+            border_frame = tk.Frame(cell_frame, bg=self.colors['border'], height=1)
+            border_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Hover effect for adding events
+        def on_hover_enter(e):
+            cell_frame.configure(bg=self.colors['hover'])
+        
+        def on_hover_leave(e):
+            cell_frame.configure(bg=bg_color)
+        
+        def on_click(e):
+            self._quick_add_event(slot_datetime)
+        
+        cell_frame.bind("<Enter>", on_hover_enter)
+        cell_frame.bind("<Leave>", on_hover_leave)
+        cell_frame.bind("<Button-1>", on_click)
+    
+    # Modern navigation and utility methods
+    def _navigate_week(self, weeks_offset):
+        """Navigate to a different week"""
+        self.current_start_date += timedelta(weeks=weeks_offset)
+        self._refresh_calendar()
+    
+    def _go_to_today(self):
+        """Navigate to current week"""
+        today = datetime.now()
+        # Get Monday of current week
+        weekday = today.weekday()
+        self.current_start_date = today - timedelta(days=weekday)
+        self._refresh_calendar()
+    
+    def _refresh_calendar(self):
+        """Refresh the calendar display"""
+        if self.window:
+            # Destroy and recreate the main frame
+            self.main_frame.destroy()
+            self.main_frame = tk.Frame(self.window, bg=self.colors['background'])
+            self.main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+            
+            # Recreate all components
+            self._create_modern_header()
+            self._create_toolbar()
+            self._create_modern_calendar_grid()
+    
+    def _show_event_details(self, event):
+        """Show detailed event information in a modern dialog"""
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Event Details")
+        dialog.geometry("400x500")
+        dialog.configure(bg=self.colors['background'])
+        dialog.transient(self.window)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (500 // 2)
+        dialog.geometry(f"400x500+{x}+{y}")
+        
+        # Event details content
+        start_dt = datetime.fromtimestamp(event['start_time']) if isinstance(event.get('start_time'), (int, float)) else event.get('start_time', datetime.now())
+        end_dt = datetime.fromtimestamp(event['end_time']) if isinstance(event.get('end_time'), (int, float)) else event.get('end_time', start_dt + timedelta(hours=1))
+        
+        # Title
+        title_label = tk.Label(
+            dialog,
+            text=event.get('title', 'Untitled Event'),
+            font=('Segoe UI', 16, 'bold'),
+            fg=self.colors['text_primary'],
+            bg=self.colors['background']
+        )
+        title_label.pack(pady=20)
+        
+        # Details frame
+        details_frame = tk.Frame(dialog, bg=self.colors['background'])
+        details_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
+        
+        details = [
+            ("Date", start_dt.strftime('%A, %B %d, %Y')),
+            ("Time", f"{start_dt.strftime('%I:%M %p')} - {end_dt.strftime('%I:%M %p')}"),
+            ("Type", event.get('event_type', 'meeting').title()),
+            ("Location", event.get('location', 'No location specified')),
+            ("Description", event.get('description', 'No description'))
+        ]
+        
+        for label, value in details:
+            row_frame = tk.Frame(details_frame, bg=self.colors['background'])
+            row_frame.pack(fill=tk.X, pady=8)
+            
+            label_widget = tk.Label(
+                row_frame,
+                text=f"{label}:",
+                font=('Segoe UI', 10, 'bold'),
+                fg=self.colors['text_secondary'],
+                bg=self.colors['background']
+            )
+            label_widget.pack(anchor='w')
+            
+            value_widget = tk.Label(
+                row_frame,
+                text=value,
+                font=('Segoe UI', 10),
+                fg=self.colors['text_primary'],
+                bg=self.colors['background'],
+                wraplength=340,
+                justify='left'
+            )
+            value_widget.pack(anchor='w', pady=(2, 0))
+        
+        # Close button
+        close_btn = tk.Button(
+            dialog,
+            text="Close",
+            font=self.fonts['body'],
+            fg='white',
+            bg=self.colors['primary'],
+            border=0,
+            relief='flat',
+            cursor='hand2',
+            padx=20,
+            pady=8,
+            command=dialog.destroy
+        )
+        close_btn.pack(pady=20)
+    
+    def _quick_add_event(self, slot_datetime):
+        """Quick add event dialog"""
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Quick Add Event")
+        dialog.geometry("350x250")
+        dialog.configure(bg=self.colors['background'])
+        dialog.transient(self.window)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (350 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (250 // 2)
+        dialog.geometry(f"350x250+{x}+{y}")
+        
+        # Title
+        title_label = tk.Label(
+            dialog,
+            text=f"New Event - {slot_datetime.strftime('%A, %B %d')}",
+            font=('Segoe UI', 14, 'bold'),
+            fg=self.colors['text_primary'],
+            bg=self.colors['background']
+        )
+        title_label.pack(pady=20)
+        
+        # Event title input
+        tk.Label(dialog, text="Event Title:", font=self.fonts['body'], 
+                fg=self.colors['text_secondary'], bg=self.colors['background']).pack(anchor='w', padx=30)
+        
+        title_entry = tk.Entry(dialog, font=self.fonts['body'], width=30)
+        title_entry.pack(pady=5, padx=30, fill=tk.X)
+        title_entry.focus()
+        
+        # Time input
+        tk.Label(dialog, text="Time:", font=self.fonts['body'], 
+                fg=self.colors['text_secondary'], bg=self.colors['background']).pack(anchor='w', padx=30, pady=(10, 0))
+        
+        time_entry = tk.Entry(dialog, font=self.fonts['body'], width=30)
+        time_entry.pack(pady=5, padx=30, fill=tk.X)
+        time_entry.insert(0, slot_datetime.strftime('%I:%M %p'))
+        
+        # Buttons
+        button_frame = tk.Frame(dialog, bg=self.colors['background'])
+        button_frame.pack(pady=20)
+        
+        def create_event():
+            title = title_entry.get().strip()
+            if title:
+                messagebox.showinfo("Success", f"Event '{title}' would be created!\n(Integration with calendar module needed)")
+                dialog.destroy()
+            else:
+                messagebox.showwarning("Warning", "Please enter an event title")
+        
+        create_btn = tk.Button(
+            button_frame,
+            text="Create Event",
+            font=self.fonts['body'],
+            fg='white',
+            bg=self.colors['primary'],
+            border=0,
+            relief='flat',
+            cursor='hand2',
+            padx=20,
+            pady=8,
+            command=create_event
+        )
+        create_btn.pack(side=tk.LEFT, padx=5)
+        
+        cancel_btn = tk.Button(
+            button_frame,
+            text="Cancel",
+            font=self.fonts['body'],
+            fg=self.colors['text_primary'],
+            bg=self.colors['surface'],
+            border=0,
+            relief='flat',
+            cursor='hand2',
+            padx=20,
+            pady=8,
+            command=dialog.destroy
+        )
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Enter key binding
+        dialog.bind('<Return>', lambda e: create_event())
+    
+    def _add_event_dialog(self):
+        """Show add event dialog"""
+        self._quick_add_event(datetime.now().replace(hour=9, minute=0, second=0, microsecond=0))
+    
+    def _switch_to_month_view(self):
+        """Switch to monthly view"""
+        if self.window:
+            self.window.destroy()
+        
+        # Launch monthly viewer
+        monthly_viewer = MonthlyCalendarViewer(self.calendar_module)
+        monthly_viewer.show_monthly_schedule()
     
     def _create_time_grid(self, parent_frame: ttk.Frame, start_date: datetime, events: List[Dict]):
         """Create the time grid with days and hourly slots"""
