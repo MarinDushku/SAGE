@@ -510,7 +510,7 @@ class SAGEApplication:
                         await self._speak_and_manage_audio(response, voice_module)
                         self.conversation_manager.command_completed(success=True)
                 
-                elif response_type in ['direct_response', 'fallback_function', 'fallback_unknown']:
+                elif response_type in ['direct_response', 'fallback_function', 'fallback_unknown', 'semantic_function']:
                     # Direct response - no confirmation needed
                     response = function_result.get('response', 'I processed your request.')
                     print(f"💬 {response}")
