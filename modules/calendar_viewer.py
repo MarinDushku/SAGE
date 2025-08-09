@@ -113,6 +113,9 @@ class WeeklyCalendarViewer:
             # Add subtle shadow effect to window
             self.window.wm_attributes("-topmost", False)
             
+            # Bind window resize event for smooth resizing
+            self.window.bind('<Configure>', self._on_window_resize)
+            
             # Center window on screen
             self._center_window()
             
@@ -130,6 +133,20 @@ class WeeklyCalendarViewer:
         pos_x = (self.window.winfo_screenwidth() // 2) - (width // 2)
         pos_y = (self.window.winfo_screenheight() // 2) - (height // 2)
         self.window.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    
+    def _on_window_resize(self, event):
+        """Handle window resize smoothly without glitches"""
+        # Only handle resize events for the main window, not child widgets
+        if event.widget == self.window:
+            # Update canvas scroll region when window is resized
+            if hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame'):
+                self.window.after_idle(self._update_scroll_region)
+    
+    def _update_scroll_region(self):
+        """Update the scroll region after resize"""
+        if hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame'):
+            self.scrollable_frame.update_idletasks()
+            self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
     
     def _create_modern_header(self):
         """Create modern header with elegant navigation"""
@@ -159,7 +176,7 @@ class WeeklyCalendarViewer:
         else:
             title_text = f"{self.current_start_date.strftime('%B %d')} – {end_date.strftime('%B %d, %Y')}"
             
-        title_label = tk.Label(
+        self.header_title_label = tk.Label(
             title_frame,
             text=title_text,
             font=self.fonts['title'],
@@ -167,7 +184,7 @@ class WeeklyCalendarViewer:
             bg=self.colors['background'],
             anchor='w'
         )
-        title_label.pack(anchor='w', pady=(10, 5))
+        self.header_title_label.pack(anchor='w', pady=(10, 5))
         
         # Subtitle
         today = datetime.now()
@@ -180,7 +197,7 @@ class WeeklyCalendarViewer:
             else:
                 subtitle_text = f"{abs(days_diff) // 7} weeks ago"
         
-        subtitle_label = tk.Label(
+        self.header_subtitle_label = tk.Label(
             title_frame,
             text=subtitle_text,
             font=self.fonts['small'],
@@ -188,7 +205,7 @@ class WeeklyCalendarViewer:
             bg=self.colors['background'],
             anchor='w'
         )
-        subtitle_label.pack(anchor='w')
+        self.header_subtitle_label.pack(anchor='w')
         
         # Navigation section
         nav_frame = tk.Frame(header_frame, bg=self.colors['background'])
@@ -318,36 +335,43 @@ class WeeklyCalendarViewer:
             command=self.calendar_canvas.yview
         )
         
-        # Scrollable frame
-        scrollable_frame = tk.Frame(self.calendar_canvas, bg=self.colors['background'])
+        # Scrollable frame - store reference for smooth updates
+        self.scrollable_frame = tk.Frame(self.calendar_canvas, bg=self.colors['background'])
         
         # Configure scrolling
-        scrollable_frame.bind(
+        self.scrollable_frame.bind(
             "<Configure>",
             lambda e: self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
         )
         
-        self.calendar_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        self.calendar_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.calendar_canvas.configure(yscrollcommand=scrollbar.set)
         
         # Get events for the week
         events = self._get_week_events(self.current_start_date)
         
         # Create the modern time grid
-        self._create_modern_time_grid(scrollable_frame, events)
+        self._create_modern_time_grid(self.scrollable_frame, events)
         
         # Pack components
         self.calendar_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Modern mouse wheel scrolling
+        # Smooth mouse wheel scrolling
         def _on_mousewheel(event):
-            self.calendar_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            # Only scroll if canvas exists and has content
+            if hasattr(self, 'calendar_canvas') and self.calendar_canvas.winfo_exists():
+                self.calendar_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         
-        # Bind to multiple widgets for better UX
-        widgets = [self.calendar_canvas, self.window]
-        for widget in widgets:
-            widget.bind_all("<MouseWheel>", _on_mousewheel)
+        # Bind scrolling only to canvas and its children
+        self.calendar_canvas.bind("<MouseWheel>", _on_mousewheel)
+        self.scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
+        
+        # Bind focus events to ensure scrolling works
+        def _on_enter(event):
+            self.calendar_canvas.focus_set()
+        
+        self.calendar_canvas.bind("<Enter>", _on_enter)
     
     def _create_modern_time_grid(self, parent_frame, events):
         """Create modern time grid with Google Calendar styling"""
@@ -415,13 +439,15 @@ class WeeklyCalendarViewer:
         grid_frame = tk.Frame(parent_frame, bg=self.colors['background'])
         grid_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Configure grid weights
-        grid_frame.columnconfigure(0, weight=0)  # Time column
+        # Configure grid weights for responsive layout
+        grid_frame.columnconfigure(0, weight=0, minsize=80)  # Time column with fixed minimum
         for i in range(1, 8):  # Day columns
-            grid_frame.columnconfigure(i, weight=1)
+            grid_frame.columnconfigure(i, weight=1, minsize=120)  # Minimum width for day columns
         
-        # Create time slots (6 AM to 10 PM)
-        for hour in range(6, 22):
+        # Create time slots (6 AM to 10 PM) with stable layout
+        total_rows = 22 - 6  # 16 hours
+        for i, hour in enumerate(range(6, 22)):
+            grid_frame.rowconfigure(i, weight=0, minsize=60)  # Fixed minimum height
             self._create_time_row(grid_frame, hour, monday_start, events)
     
     def _create_time_row(self, parent, hour, monday_start, events):
@@ -481,8 +507,9 @@ class WeeklyCalendarViewer:
             bd=0,
             height=60
         )
-        cell_frame.grid(row=row, column=col, sticky='ew', padx=2, pady=1)
+        cell_frame.grid(row=row, column=col, sticky='nsew', padx=2, pady=1)
         cell_frame.grid_propagate(False)
+        cell_frame.pack_propagate(False)
         
         for event in events[:2]:  # Show max 2 events per slot
             self._create_event_block(cell_frame, event)
@@ -562,8 +589,9 @@ class WeeklyCalendarViewer:
             height=60,
             cursor='crosshair'
         )
-        cell_frame.grid(row=row, column=col, sticky='ew', padx=2, pady=1)
+        cell_frame.grid(row=row, column=col, sticky='nsew', padx=2, pady=1)
         cell_frame.grid_propagate(False)
+        cell_frame.pack_propagate(False)
         
         # Add subtle border on alternate rows
         if row % 2 == 1:
@@ -599,17 +627,55 @@ class WeeklyCalendarViewer:
         self._refresh_calendar()
     
     def _refresh_calendar(self):
-        """Refresh the calendar display"""
-        if self.window:
-            # Destroy and recreate the main frame
-            self.main_frame.destroy()
-            self.main_frame = tk.Frame(self.window, bg=self.colors['background'])
-            self.main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        """Smooth refresh without destroying the entire UI"""
+        if self.window and hasattr(self, 'header_title_label') and hasattr(self, 'header_subtitle_label'):
+            # Update header text only
+            self._update_header_text()
             
-            # Recreate all components
-            self._create_modern_header()
-            self._create_toolbar()
-            self._create_modern_calendar_grid()
+            # Update calendar grid content only (don't recreate the whole structure)
+            self._update_calendar_content()
+    
+    def _update_header_text(self):
+        """Update just the header text without recreating widgets"""
+        end_date = self.current_start_date + timedelta(days=6)
+        
+        # Update main title
+        if self.current_start_date.month == end_date.month:
+            title_text = f"{self.current_start_date.strftime('%B %d')} – {end_date.strftime('%d, %Y')}"
+        else:
+            title_text = f"{self.current_start_date.strftime('%B %d')} – {end_date.strftime('%B %d, %Y')}"
+        
+        self.header_title_label.config(text=title_text)
+        
+        # Update subtitle
+        today = datetime.now()
+        if self._is_current_week(self.current_start_date, today):
+            subtitle_text = "This Week"
+        else:
+            days_diff = (self.current_start_date - today).days
+            if days_diff > 0:
+                subtitle_text = f"{days_diff // 7} weeks ahead"
+            else:
+                subtitle_text = f"{abs(days_diff) // 7} weeks ago"
+        
+        self.header_subtitle_label.config(text=subtitle_text)
+    
+    def _update_calendar_content(self):
+        """Update only the calendar content without recreating the canvas"""
+        if hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame'):
+            # Clear existing content
+            for widget in self.scrollable_frame.winfo_children():
+                widget.destroy()
+            
+            # Get new events
+            events = self._get_week_events(self.current_start_date)
+            
+            # Recreate just the time grid content
+            self._create_modern_time_grid(self.scrollable_frame, events)
+            
+            # Update canvas scroll region
+            self.scrollable_frame.update_idletasks()
+            self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
     
     def _show_event_details(self, event):
         """Show detailed event information in a modern dialog"""
