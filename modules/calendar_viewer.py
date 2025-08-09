@@ -50,6 +50,12 @@ class WeeklyCalendarViewer:
             'default': {'bg': '#757575', 'text': '#ffffff', 'light': '#f5f5f5'}       # Gray
         }
         
+        # Performance optimization - Cache frequently accessed data
+        self.events_cache = {}
+        self.widget_pool = {'event_blocks': [], 'empty_cells': []}
+        self.current_widgets = []
+        self.last_refresh = 0
+        
         # Modern fonts
         self.fonts = {
             'title': ('Segoe UI', 20, 'bold'),
@@ -374,81 +380,179 @@ class WeeklyCalendarViewer:
         self.calendar_canvas.bind("<Enter>", _on_enter)
     
     def _create_modern_time_grid(self, parent_frame, events):
-        """Create modern time grid with Google Calendar styling"""
+        """Optimized time grid creation with batch operations"""
         # Adjust to Monday of the current week
         weekday = self.current_start_date.weekday()
         monday_start = self.current_start_date - timedelta(days=weekday)
         
-        # Days of the week
-        weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        # Pre-calculate event slots for efficiency
+        events_by_slot = self._preprocess_events_by_slot(events, monday_start)
         
-        # Create header with day names and dates
+        # Create header efficiently
+        self._create_efficient_header(parent_frame, monday_start)
+        
+        # Create main grid with batch operations
+        self._create_efficient_grid(parent_frame, monday_start, events_by_slot)
+    
+    def _preprocess_events_by_slot(self, events, monday_start):
+        """Pre-calculate which events belong to which time slots for efficiency"""
+        events_by_slot = {}
+        
+        for hour in range(6, 22):  # 6 AM to 10 PM
+            for day in range(7):  # 7 days
+                slot_datetime = monday_start + timedelta(days=day, hours=hour)
+                slot_end = slot_datetime + timedelta(hours=1)
+                
+                slot_key = (day, hour)
+                events_by_slot[slot_key] = []
+                
+                for event in events:
+                    if (event['start_time'] < slot_end and event['end_time'] > slot_datetime):
+                        events_by_slot[slot_key].append(event)
+        
+        return events_by_slot
+    
+    def _create_efficient_header(self, parent_frame, monday_start):
+        """Create header with minimal widget creation"""
+        weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
+        today = datetime.now().date()
+        
+        # Header frame
         header_frame = tk.Frame(parent_frame, bg=self.colors['background'], height=60)
         header_frame.pack(fill=tk.X, pady=(0, 10))
         header_frame.pack_propagate(False)
         
-        # Configure grid weights
-        header_frame.columnconfigure(0, weight=0)  # Time column
-        for i in range(1, 8):  # Day columns
+        # Configure columns once
+        header_frame.columnconfigure(0, weight=0, minsize=80)
+        for i in range(1, 8):
             header_frame.columnconfigure(i, weight=1)
         
-        # Time column header (empty)
-        time_header_space = tk.Frame(
-            header_frame, 
-            bg=self.colors['background'],
-            width=80
-        )
-        time_header_space.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
+        # Time column spacer
+        tk.Frame(header_frame, bg=self.colors['background']).grid(row=0, column=0)
         
-        # Day headers with modern styling
-        today = datetime.now().date()
+        # Day headers in batch
         for i, day_name in enumerate(weekdays):
             day_date = monday_start + timedelta(days=i)
             is_today = day_date.date() == today
             
-            # Day header frame
-            day_header_frame = tk.Frame(
-                header_frame,
-                bg=self.colors['primary_light'] if is_today else self.colors['background'],
-                relief='flat',
-                bd=0
-            )
-            day_header_frame.grid(row=0, column=i+1, sticky='ew', padx=2, pady=5)
+            bg_color = self.colors['primary_light'] if is_today else self.colors['background']
+            text_color = self.colors['primary'] if is_today else self.colors['text_primary']
             
-            # Day name
+            # Single label with both day and date
+            day_text = f"{day_name}\n{day_date.day}"
+            
             day_label = tk.Label(
-                day_header_frame,
-                text=day_name[:3].upper(),  # MON, TUE, etc.
-                font=('Segoe UI', 9, 'bold'),
-                fg=self.colors['primary'] if is_today else self.colors['text_secondary'],
-                bg=self.colors['primary_light'] if is_today else self.colors['background']
+                header_frame,
+                text=day_text,
+                font=('Segoe UI', 11, 'bold'),
+                fg=text_color,
+                bg=bg_color,
+                relief='flat'
             )
-            day_label.pack(pady=(8, 2))
-            
-            # Date number
-            date_label = tk.Label(
-                day_header_frame,
-                text=str(day_date.day),
-                font=('Segoe UI', 16, 'bold'),
-                fg=self.colors['primary'] if is_today else self.colors['text_primary'],
-                bg=self.colors['primary_light'] if is_today else self.colors['background']
-            )
-            date_label.pack(pady=(0, 8))
-        
+            day_label.grid(row=0, column=i+1, sticky='ew', padx=2, pady=5)
+    
+    def _create_efficient_grid(self, parent_frame, monday_start, events_by_slot):
+        """Create grid with optimized widget management"""
         # Main grid frame
         grid_frame = tk.Frame(parent_frame, bg=self.colors['background'])
         grid_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Configure grid weights for responsive layout
-        grid_frame.columnconfigure(0, weight=0, minsize=80)  # Time column with fixed minimum
-        for i in range(1, 8):  # Day columns
-            grid_frame.columnconfigure(i, weight=1, minsize=120)  # Minimum width for day columns
+        # Configure all columns and rows in batch
+        grid_frame.columnconfigure(0, weight=0, minsize=80)
+        for i in range(1, 8):
+            grid_frame.columnconfigure(i, weight=1, minsize=120)
         
-        # Create time slots (6 AM to 10 PM) with stable layout
-        total_rows = 22 - 6  # 16 hours
+        for i in range(16):  # 16 hours (6 AM to 10 PM)
+            grid_frame.rowconfigure(i, weight=0, minsize=60)
+        
+        # Create time slots efficiently
         for i, hour in enumerate(range(6, 22)):
-            grid_frame.rowconfigure(i, weight=0, minsize=60)  # Fixed minimum height
-            self._create_time_row(grid_frame, hour, monday_start, events)
+            self._create_efficient_time_row(grid_frame, i, hour, monday_start, events_by_slot)
+    
+    def _create_efficient_time_row(self, parent, row, hour, monday_start, events_by_slot):
+        """Create a single time row with minimal widget creation"""
+        # Time label
+        time_text = f"{hour % 12 or 12} {'PM' if hour >= 12 else 'AM'}"
+        
+        time_label = tk.Label(
+            parent,
+            text=time_text,
+            font=self.fonts['small'],
+            fg=self.colors['text_secondary'],
+            bg=self.colors['background'],
+            anchor='e'
+        )
+        time_label.grid(row=row, column=0, sticky='e', padx=(0, 10), pady=2)
+        
+        # Create day cells efficiently
+        bg_color = self.colors['surface'] if row % 2 == 1 else self.colors['background']
+        
+        for day_idx in range(7):
+            slot_events = events_by_slot.get((day_idx, hour), [])
+            
+            if slot_events:
+                self._create_efficient_event_cell(parent, row, day_idx + 1, slot_events, bg_color)
+            else:
+                self._create_efficient_empty_cell(parent, row, day_idx + 1, bg_color)
+    
+    def _create_efficient_event_cell(self, parent, row, col, events, bg_color):
+        """Create event cell with minimal widgets"""
+        # Use single frame with text combining multiple events
+        if len(events) == 1:
+            event = events[0]
+            colors = self.event_colors.get(event['event_type'], self.event_colors['default'])
+            
+            cell_frame = tk.Frame(parent, bg=colors['bg'], height=60, cursor='hand2')
+            cell_frame.grid(row=row, column=col, sticky='nsew', padx=2, pady=1)
+            cell_frame.grid_propagate(False)
+            
+            # Single label with event info
+            event_text = f"{event['title'][:20]}\n{event['time_str']}"
+            
+            tk.Label(
+                cell_frame,
+                text=event_text,
+                font=('Segoe UI', 8),
+                fg=colors['text'],
+                bg=colors['bg'],
+                justify='left'
+            ).pack(anchor='w', padx=4, pady=2)
+            
+            # Bind click event
+            cell_frame.bind("<Button-1>", lambda e: self._show_event_details(event))
+            
+        else:
+            # Multiple events - show count
+            cell_frame = tk.Frame(parent, bg=self.colors['primary'], height=60, cursor='hand2')
+            cell_frame.grid(row=row, column=col, sticky='nsew', padx=2, pady=1)
+            cell_frame.grid_propagate(False)
+            
+            tk.Label(
+                cell_frame,
+                text=f"{len(events)} events\n{events[0]['time_str']}",
+                font=('Segoe UI', 8, 'bold'),
+                fg='white',
+                bg=self.colors['primary']
+            ).pack(expand=True)
+    
+    def _create_efficient_empty_cell(self, parent, row, col, bg_color):
+        """Create empty cell with minimal overhead"""
+        cell_frame = tk.Frame(parent, bg=bg_color, height=60, cursor='crosshair')
+        cell_frame.grid(row=row, column=col, sticky='nsew', padx=2, pady=1)
+        cell_frame.grid_propagate(False)
+        
+        # Add subtle border for alternate rows
+        if row % 2 == 1:
+            tk.Frame(cell_frame, bg=self.colors['border'], height=1).pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Hover effect only
+        def on_hover(e):
+            cell_frame.config(bg=self.colors['hover'])
+        def on_leave(e):
+            cell_frame.config(bg=bg_color)
+        
+        cell_frame.bind("<Enter>", on_hover)
+        cell_frame.bind("<Leave>", on_leave)
     
     def _create_time_row(self, parent, hour, monday_start, events):
         """Create a single time row with modern styling"""
@@ -612,10 +716,10 @@ class WeeklyCalendarViewer:
         cell_frame.bind("<Leave>", on_hover_leave)
         cell_frame.bind("<Button-1>", on_click)
     
-    # Modern navigation and utility methods
-    def _navigate_week(self, weeks_offset):
+    # Modern navigation and utility methods  
+    def _navigate_week(self, days_offset):
         """Navigate to a different week"""
-        self.current_start_date += timedelta(weeks=weeks_offset)
+        self.current_start_date += timedelta(days=days_offset)
         self._refresh_calendar()
     
     def _go_to_today(self):
@@ -661,21 +765,32 @@ class WeeklyCalendarViewer:
         self.header_subtitle_label.config(text=subtitle_text)
     
     def _update_calendar_content(self):
-        """Update only the calendar content without recreating the canvas"""
-        if hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame'):
-            # Clear existing content
-            for widget in self.scrollable_frame.winfo_children():
-                widget.destroy()
-            
-            # Get new events
-            events = self._get_week_events(self.current_start_date)
-            
-            # Recreate just the time grid content
-            self._create_modern_time_grid(self.scrollable_frame, events)
-            
-            # Update canvas scroll region
-            self.scrollable_frame.update_idletasks()
-            self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
+        """Ultra-fast calendar content update"""
+        if not (hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame')):
+            return
+        
+        # Clear cache for new week
+        cache_key = self.current_start_date.strftime('%Y-%m-%d')
+        if cache_key in self.events_cache:
+            del self.events_cache[cache_key]
+        
+        # Disable updates temporarily for batch operation
+        self.scrollable_frame.update_idletasks = lambda: None
+        
+        # Clear existing content efficiently
+        for widget in self.scrollable_frame.winfo_children():
+            widget.destroy()
+        
+        # Get new events with caching
+        events = self._get_week_events(self.current_start_date)
+        
+        # Recreate content with optimized methods
+        self._create_modern_time_grid(self.scrollable_frame, events)
+        
+        # Re-enable updates and update once
+        self.scrollable_frame.update_idletasks = tk.Frame.update_idletasks.__get__(self.scrollable_frame)
+        self.scrollable_frame.update_idletasks()
+        self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
     
     def _show_event_details(self, event):
         """Show detailed event information in a modern dialog"""
@@ -971,13 +1086,18 @@ class WeeklyCalendarViewer:
             parent_frame.columnconfigure(i, weight=1)
     
     def _get_week_events(self, start_date: datetime) -> List[Dict]:
-        """Get all events for the week starting from start_date"""
+        """Get all events for the week with caching for performance"""
         try:
-            events = []
-            
             # Adjust to Monday of the current week
-            weekday = start_date.weekday()  # Monday = 0, Sunday = 6
+            weekday = start_date.weekday()
             monday_start = start_date - timedelta(days=weekday)
+            cache_key = monday_start.strftime('%Y-%m-%d')
+            
+            # Check cache first
+            if cache_key in self.events_cache:
+                return self.events_cache[cache_key]
+            
+            events = []
             end_date = monday_start + timedelta(days=7)
             
             # Get database path
@@ -985,34 +1105,48 @@ class WeeklyCalendarViewer:
             if self.calendar_module and hasattr(self.calendar_module, 'db_path'):
                 db_path = self.calendar_module.db_path
             
-            with sqlite3.connect(db_path) as conn:
-                cursor = conn.cursor()
-                
-                start_timestamp = monday_start.timestamp()
-                end_timestamp = end_date.timestamp()
-                
-                cursor.execute("""
-                    SELECT event_id, title, start_time, end_time, location, description
-                    FROM events 
-                    WHERE start_time >= ? AND start_time < ?
-                    ORDER BY start_time
-                """, (start_timestamp, end_timestamp))
-                
-                for row in cursor.fetchall():
-                    event_id, title, start_time, end_time, location, description = row
+            try:
+                with sqlite3.connect(db_path) as conn:
+                    cursor = conn.cursor()
                     
-                    start_dt = datetime.fromtimestamp(start_time)
-                    end_dt = datetime.fromtimestamp(end_time) if end_time else start_dt + timedelta(hours=1)
+                    start_timestamp = monday_start.timestamp()
+                    end_timestamp = end_date.timestamp()
                     
-                    events.append({
-                        'id': event_id,
-                        'title': title,
-                        'start_time': start_dt,
-                        'end_time': end_dt,
-                        'time_str': start_dt.strftime('%I:%M %p'),
-                        'location': location,
-                        'description': description
-                    })
+                    cursor.execute("""
+                        SELECT event_id, title, start_time, end_time, location, description, event_type
+                        FROM events 
+                        WHERE start_time >= ? AND start_time < ?
+                        ORDER BY start_time
+                    """, (start_timestamp, end_timestamp))
+                    
+                    for row in cursor.fetchall():
+                        event_id, title, start_time, end_time, location, description, event_type = row
+                        
+                        start_dt = datetime.fromtimestamp(start_time)
+                        end_dt = datetime.fromtimestamp(end_time) if end_time else start_dt + timedelta(hours=1)
+                        
+                        events.append({
+                            'id': event_id,
+                            'title': title,
+                            'start_time': start_dt,
+                            'end_time': end_dt,
+                            'time_str': start_dt.strftime('%I:%M %p'),
+                            'location': location or '',
+                            'description': description or '',
+                            'event_type': event_type or 'meeting'
+                        })
+                    
+                    # Cache the result
+                    self.events_cache[cache_key] = events
+                    
+                    # Keep cache size reasonable (last 4 weeks)
+                    if len(self.events_cache) > 4:
+                        oldest_key = min(self.events_cache.keys())
+                        del self.events_cache[oldest_key]
+                    
+            except sqlite3.Error:
+                # Database doesn't exist or has issues, return empty
+                pass
             
             return events
             
