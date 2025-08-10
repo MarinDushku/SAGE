@@ -50,11 +50,16 @@ class WeeklyCalendarViewer:
             'default': {'bg': '#757575', 'text': '#ffffff', 'light': '#f5f5f5'}       # Gray
         }
         
-        # Performance optimization - Cache frequently accessed data
+        # Performance optimization - Cache frequently accessed data and widgets
         self.events_cache = {}
-        self.widget_pool = {'event_blocks': [], 'empty_cells': []}
-        self.current_widgets = []
+        self.widget_cache = {}  # Cache widgets for reuse
+        self.grid_widgets = {}  # Store current grid widgets by position
+        self.last_week_key = None
         self.last_refresh = 0
+        
+        # Virtualization - only create widgets that are visible
+        self.visible_hours = list(range(6, 22))  # 6 AM to 10 PM
+        self.grid_created = False
         
         # Modern fonts
         self.fonts = {
@@ -412,7 +417,7 @@ class WeeklyCalendarViewer:
         return events_by_slot
     
     def _create_efficient_header(self, parent_frame, monday_start):
-        """Create header with minimal widget creation"""
+        """Create header with widget caching for updates"""
         weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
         today = datetime.now().date()
         
@@ -429,7 +434,7 @@ class WeeklyCalendarViewer:
         # Time column spacer
         tk.Frame(header_frame, bg=self.colors['background']).grid(row=0, column=0)
         
-        # Day headers in batch
+        # Day headers with caching
         for i, day_name in enumerate(weekdays):
             day_date = monday_start + timedelta(days=i)
             is_today = day_date.date() == today
@@ -449,6 +454,9 @@ class WeeklyCalendarViewer:
                 relief='flat'
             )
             day_label.grid(row=0, column=i+1, sticky='ew', padx=2, pady=5)
+            
+            # Cache for fast updates
+            self.widget_cache[f"day_header_{i}"] = day_label
     
     def _create_efficient_grid(self, parent_frame, monday_start, events_by_slot):
         """Create grid with optimized widget management"""
@@ -602,7 +610,7 @@ class WeeklyCalendarViewer:
                 self._create_empty_cell(parent, row, day_idx + 1, bg_color, slot_datetime)
     
     def _create_event_cell(self, parent, row, col, events, bg_color):
-        """Create a cell with events using modern styling"""
+        """Create a cell with events and caching for updates"""
         cell_frame = tk.Frame(
             parent,
             bg=bg_color,
@@ -628,6 +636,11 @@ class WeeklyCalendarViewer:
                 cursor='hand2'
             )
             more_label.pack(anchor='w', padx=5, pady=2)
+        
+        # Cache this cell for ultra-fast updates
+        hour = row + 6  # Convert back to actual hour
+        day_idx = col - 1  # Convert back to day index
+        self.widget_cache[f"cell_{hour}_{day_idx}"] = cell_frame
     
     def _create_event_block(self, parent, event):
         """Create a beautiful event block"""
@@ -683,7 +696,7 @@ class WeeklyCalendarViewer:
             widget.bind("<Button-1>", on_click)
     
     def _create_empty_cell(self, parent, row, col, bg_color, slot_datetime):
-        """Create an empty time slot with hover effect"""
+        """Create an empty time slot with caching for updates"""
         cell_frame = tk.Frame(
             parent,
             bg=bg_color,
@@ -701,12 +714,15 @@ class WeeklyCalendarViewer:
             border_frame = tk.Frame(cell_frame, bg=self.colors['border'], height=1)
             border_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
+        # Store original background for hover effects
+        original_bg = bg_color
+        
         # Hover effect for adding events
         def on_hover_enter(e):
             cell_frame.configure(bg=self.colors['hover'])
         
         def on_hover_leave(e):
-            cell_frame.configure(bg=bg_color)
+            cell_frame.configure(bg=original_bg)
         
         def on_click(e):
             self._quick_add_event(slot_datetime)
@@ -714,6 +730,11 @@ class WeeklyCalendarViewer:
         cell_frame.bind("<Enter>", on_hover_enter)
         cell_frame.bind("<Leave>", on_hover_leave)
         cell_frame.bind("<Button-1>", on_click)
+        
+        # Cache this cell for ultra-fast updates
+        hour = row + 6  # Convert back to actual hour
+        day_idx = col - 1  # Convert back to day index
+        self.widget_cache[f"cell_{hour}_{day_idx}"] = cell_frame
     
     # Modern navigation and utility methods  
     def _navigate_week(self, days_offset):
@@ -764,28 +785,139 @@ class WeeklyCalendarViewer:
         self.header_subtitle_label.config(text=subtitle_text)
     
     def _update_calendar_content(self):
-        """Natural calendar content update with proper scrolling"""
+        """Ultra-fast calendar update using widget virtualization"""
         if not (hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame')):
             return
         
-        # Clear existing content
-        for widget in self.scrollable_frame.winfo_children():
-            widget.destroy()
+        # Get week key for caching
+        weekday = self.current_start_date.weekday()
+        monday_start = self.current_start_date - timedelta(days=weekday)
+        week_key = monday_start.strftime('%Y-%m-%d')
+        
+        # If same week, just return - no update needed
+        if week_key == self.last_week_key:
+            return
+        
+        self.last_week_key = week_key
         
         # Get new events (with caching)
         events = self._get_week_events(self.current_start_date)
         
-        # Recreate content
-        self._create_modern_time_grid(self.scrollable_frame, events)
+        if not self.grid_created:
+            # First time - create the grid structure
+            self._create_virtualized_grid(events)
+        else:
+            # Update existing grid with new data - MUCH faster
+            self._update_virtualized_grid(events)
         
-        # Update canvas for natural scrolling behavior
+        # Minimal canvas update
         self.scrollable_frame.update_idletasks()
         self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
+    
+    def _create_virtualized_grid(self, events):
+        """Create the grid structure once - never recreate"""
+        # Clear only if needed
+        if self.scrollable_frame.winfo_children():
+            for widget in self.scrollable_frame.winfo_children():
+                widget.destroy()
         
-        # Ensure proper width
-        if hasattr(self, 'canvas_window'):
-            canvas_width = self.calendar_canvas.winfo_width()
-            self.calendar_canvas.itemconfig(self.canvas_window, width=canvas_width)
+        # Create permanent grid structure
+        self._create_modern_time_grid(self.scrollable_frame, events)
+        self.grid_created = True
+    
+    def _update_virtualized_grid(self, events):
+        """Update existing grid with new data - no widget recreation"""
+        weekday = self.current_start_date.weekday()
+        monday_start = self.current_start_date - timedelta(days=weekday)
+        
+        # Pre-calculate event slots
+        events_by_slot = self._preprocess_events_by_slot(events, monday_start)
+        
+        # Update only the data, not the widgets
+        self._update_existing_grid_data(monday_start, events_by_slot)
+    
+    def _update_existing_grid_data(self, monday_start, events_by_slot):
+        """Update grid data without recreating widgets - FASTEST method"""
+        today = datetime.now().date()
+        
+        # Update day headers (if they exist)
+        weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
+        
+        # Update only text content of existing widgets
+        for i, day_name in enumerate(weekdays):
+            day_date = monday_start + timedelta(days=i)
+            is_today = day_date.date() == today
+            
+            # Find and update existing day header
+            widget_key = f"day_header_{i}"
+            if widget_key in self.widget_cache:
+                day_widget = self.widget_cache[widget_key]
+                day_text = f"{day_name}\n{day_date.day}"
+                
+                # Update colors for today
+                bg_color = self.colors['primary_light'] if is_today else self.colors['background']
+                text_color = self.colors['primary'] if is_today else self.colors['text_primary']
+                
+                day_widget.config(text=day_text, bg=bg_color, fg=text_color)
+        
+        # Update event cells without recreating widgets
+        for hour in range(6, 22):
+            for day_idx in range(7):
+                slot_events = events_by_slot.get((day_idx, hour), [])
+                widget_key = f"cell_{hour}_{day_idx}"
+                
+                if widget_key in self.widget_cache:
+                    cell_frame = self.widget_cache[widget_key]
+                    
+                    # Clear existing event widgets in this cell
+                    for child in cell_frame.winfo_children():
+                        child.destroy()
+                    
+                    # Add new event content
+                    if slot_events:
+                        self._add_events_to_existing_cell(cell_frame, slot_events)
+                    else:
+                        # Reset to empty cell appearance
+                        row = hour - 6
+                        bg_color = self.colors['surface'] if row % 2 == 1 else self.colors['background']
+                        cell_frame.config(bg=bg_color)
+    
+    def _add_events_to_existing_cell(self, cell_frame, events):
+        """Add events to existing cell widget"""
+        if len(events) == 1:
+            event = events[0]
+            colors = self.event_colors.get(event['event_type'], self.event_colors['default'])
+            
+            cell_frame.config(bg=colors['bg'])
+            
+            # Single label with event info
+            event_text = f"{event['title'][:20]}\n{event['time_str']}"
+            
+            event_label = tk.Label(
+                cell_frame,
+                text=event_text,
+                font=('Segoe UI', 8),
+                fg=colors['text'],
+                bg=colors['bg'],
+                justify='left'
+            )
+            event_label.pack(anchor='w', padx=4, pady=2)
+            
+            # Bind click event
+            event_label.bind("<Button-1>", lambda e: self._show_event_details(event))
+            
+        else:
+            # Multiple events
+            cell_frame.config(bg=self.colors['primary'])
+            
+            multi_label = tk.Label(
+                cell_frame,
+                text=f"{len(events)} events\n{events[0]['time_str']}",
+                font=('Segoe UI', 8, 'bold'),
+                fg='white',
+                bg=self.colors['primary']
+            )
+            multi_label.pack(expand=True)
     
     def _show_event_details(self, event):
         """Show detailed event information in a modern dialog"""
