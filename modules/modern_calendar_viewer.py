@@ -407,12 +407,15 @@ class ModernCalendarViewer:
                 return True
             
             if threaded:
-                # Run GUI in separate thread to avoid blocking (for SAGE integration)
+                # Run GUI in proper non-daemon thread for stability
                 gui_thread = threading.Thread(
                     target=self._run_calendar_gui,
-                    daemon=True
+                    daemon=False  # Non-daemon for GUI stability
                 )
                 gui_thread.start()
+                # Give thread time to initialize GUI
+                import time
+                time.sleep(0.1)
             else:
                 # Run directly in main thread (for standalone use)
                 self._run_calendar_gui()
@@ -424,26 +427,35 @@ class ModernCalendarViewer:
             return False
     
     def _run_calendar_gui(self):
-        """Run the calendar GUI in a separate thread"""
+        """Run the calendar GUI"""
         try:
-            # Pause voice recognition while calendar is open
-            self._pause_voice_sync()
+            # Pause voice recognition while calendar is open (only if plugin manager available)
+            if self.plugin_manager:
+                self._pause_voice_sync()
             
             self._create_main_window()
             self._create_layout()
             self._load_and_display_events()
             
             # Set up window close handler to resume voice recognition
-            self._window.protocol("WM_DELETE_WINDOW", self._on_calendar_close)
+            if self.plugin_manager:
+                self._window.protocol("WM_DELETE_WINDOW", self._on_calendar_close)
+            else:
+                # Standard close for standalone use
+                self._window.protocol("WM_DELETE_WINDOW", self._window.destroy)
             
             # Start the event loop
             self._window.mainloop()
             
         except Exception as e:
             self._logger.error(f"Failed to run calendar GUI: {e}")
-            self._show_error_dialog("Calendar Error", f"Failed to open calendar: {e}")
+            try:
+                self._show_error_dialog("Calendar Error", f"Failed to open calendar: {e}")
+            except:
+                pass
             # Ensure voice resumes even on error
-            self._resume_voice_sync()
+            if self.plugin_manager:
+                self._resume_voice_sync()
     
     def _pause_voice_sync(self):
         """Pause voice recognition synchronously"""
