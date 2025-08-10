@@ -380,7 +380,8 @@ class SAGEApplication:
             calendar_module = self.plugin_manager.get_module('calendar')
             self.function_registry = FunctionRegistry(
                 self.logger.get_logger("functions"),
-                calendar_module  # Pass calendar module for real integration
+                calendar_module,  # Pass calendar module for real integration
+                self.plugin_manager  # Pass plugin manager for voice control
             )
             self.function_processor = FunctionCallingProcessor(
                 self.function_registry, 

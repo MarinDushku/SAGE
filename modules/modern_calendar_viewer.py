@@ -384,6 +384,10 @@ class ModernCalendarViewer:
         # Performance tracking
         self._render_times = []
         self._last_render = 0
+        
+        # Voice control integration
+        self.plugin_manager = None
+        self._voice_was_active = False
     
     @property
     def current_week_start(self) -> datetime:
@@ -413,9 +417,15 @@ class ModernCalendarViewer:
     def _run_calendar_gui(self):
         """Run the calendar GUI in a separate thread"""
         try:
+            # Pause voice recognition while calendar is open
+            self._pause_voice_sync()
+            
             self._create_main_window()
             self._create_layout()
             self._load_and_display_events()
+            
+            # Set up window close handler to resume voice recognition
+            self._window.protocol("WM_DELETE_WINDOW", self._on_calendar_close)
             
             # Start the event loop
             self._window.mainloop()
@@ -423,6 +433,52 @@ class ModernCalendarViewer:
         except Exception as e:
             self._logger.error(f"Failed to run calendar GUI: {e}")
             self._show_error_dialog("Calendar Error", f"Failed to open calendar: {e}")
+            # Ensure voice resumes even on error
+            self._resume_voice_sync()
+    
+    def _pause_voice_sync(self):
+        """Pause voice recognition synchronously"""
+        try:
+            if self.plugin_manager:
+                voice_module = self.plugin_manager.get_module('voice')
+                if voice_module and hasattr(voice_module, 'recognition_engine'):
+                    # Direct synchronous access to the recognition engine
+                    recognition_engine = voice_module.recognition_engine
+                    if hasattr(recognition_engine, 'recognition_active'):
+                        self._voice_was_active = recognition_engine.recognition_active
+                        recognition_engine.recognition_active = False
+                        self._logger.info("Voice recognition paused for calendar")
+        except Exception as e:
+            self._logger.warning(f"Could not pause voice recognition: {e}")
+    
+    def _resume_voice_sync(self):
+        """Resume voice recognition synchronously"""
+        try:
+            if self.plugin_manager and self._voice_was_active:
+                voice_module = self.plugin_manager.get_module('voice')
+                if voice_module and hasattr(voice_module, 'recognition_engine'):
+                    # Direct synchronous access to the recognition engine
+                    recognition_engine = voice_module.recognition_engine
+                    if hasattr(recognition_engine, 'recognition_active'):
+                        import time
+                        time.sleep(2.0)  # 2 second break as requested
+                        recognition_engine.recognition_active = True
+                        self._logger.info("Voice recognition resumed after calendar closed")
+        except Exception as e:
+            self._logger.warning(f"Could not resume voice recognition: {e}")
+    
+    def _on_calendar_close(self):
+        """Handle calendar window close"""
+        try:
+            # Resume voice recognition when calendar closes
+            self._resume_voice_sync()
+            self._window.destroy()
+        except Exception as e:
+            self._logger.error(f"Error during calendar close: {e}")
+            try:
+                self._window.destroy()
+            except:
+                pass
     
     def _create_main_window(self):
         """Create and configure the main window"""
@@ -1228,6 +1284,11 @@ def show_weekly_calendar(calendar_module=None) -> Dict[str, Any]:
     try:
         db_path = "/home/marin/SAGE/data/calendar.db"
         viewer = ModernCalendarViewer(db_path)
+        
+        # Pass plugin manager reference for voice control
+        if hasattr(calendar_module, 'plugin_manager'):
+            viewer.plugin_manager = calendar_module.plugin_manager
+        
         success = viewer.show()
         
         return {

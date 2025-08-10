@@ -14,11 +14,12 @@ import inspect
 class FunctionRegistry:
     """Registry of available functions that the LLM can call"""
     
-    def __init__(self, logger=None, calendar_module=None):
+    def __init__(self, logger=None, calendar_module=None, plugin_manager=None):
         self.logger = logger or logging.getLogger(__name__)
         self.functions: Dict[str, Dict[str, Any]] = {}
         self.handlers: Dict[str, Callable] = {}
         self.calendar_module = calendar_module
+        self.plugin_manager = plugin_manager
         
         # Register built-in functions
         self._register_builtin_functions()
@@ -569,7 +570,13 @@ class FunctionRegistry:
         """Show weekly calendar GUI"""
         try:
             from modules.modern_calendar_viewer import show_weekly_calendar
-            result = show_weekly_calendar(self.calendar_module)
+            
+            # Create calendar module with plugin manager access
+            calendar_module_with_pm = type('CalendarModule', (), {
+                'plugin_manager': self.plugin_manager
+            })()
+            
+            result = show_weekly_calendar(calendar_module_with_pm)
             
             if result.get('success'):
                 return result.get('result', 'Weekly calendar opened.')
