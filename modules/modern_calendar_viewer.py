@@ -398,18 +398,31 @@ class ModernCalendarViewer:
                 self._window.lift()
                 return True
             
+            # Run GUI in separate thread to avoid blocking
+            gui_thread = threading.Thread(
+                target=self._run_calendar_gui,
+                daemon=True
+            )
+            gui_thread.start()
+            return True
+            
+        except Exception as e:
+            self._logger.error(f"Failed to show calendar: {e}")
+            return False
+    
+    def _run_calendar_gui(self):
+        """Run the calendar GUI in a separate thread"""
+        try:
             self._create_main_window()
             self._create_layout()
             self._load_and_display_events()
             
             # Start the event loop
             self._window.mainloop()
-            return True
             
         except Exception as e:
-            self._logger.error(f"Failed to show calendar: {e}")
+            self._logger.error(f"Failed to run calendar GUI: {e}")
             self._show_error_dialog("Calendar Error", f"Failed to open calendar: {e}")
-            return False
     
     def _create_main_window(self):
         """Create and configure the main window"""
