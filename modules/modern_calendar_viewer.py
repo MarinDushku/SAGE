@@ -88,8 +88,12 @@ class CalendarEvent:
         """Validate event data for security"""
         if not self.event_id or len(self.event_id) > 50:
             raise ValueError("Invalid event_id")
-        if not self.title or len(self.title) > 200:
+        if len(self.title) > 200:
             raise ValueError("Invalid title")
+        
+        # Handle empty titles gracefully
+        if not self.title:
+            object.__setattr__(self, 'title', "Untitled Event")
         if self.start_time >= self.end_time:
             raise ValueError("Invalid time range")
         if len(self.description) > 1000:
@@ -1287,7 +1291,8 @@ class ModernCalendarViewer:
 def show_weekly_calendar(calendar_module=None) -> Dict[str, Any]:
     """Show modern weekly calendar GUI - SAGE function calling integration"""
     try:
-        db_path = "/home/marin/SAGE/data/calendar.db"
+        # Use Windows-compatible path
+        db_path = "data/calendar.db"
         viewer = ModernCalendarViewer(db_path)
         
         # Pass plugin manager reference for voice control
@@ -1310,7 +1315,7 @@ def show_weekly_calendar(calendar_module=None) -> Dict[str, Any]:
 def show_monthly_calendar(calendar_module=None) -> Dict[str, Any]:
     """Show modern monthly calendar GUI - SAGE function calling integration"""
     try:
-        db_path = "/home/marin/SAGE/data/calendar.db"
+        db_path = "data/calendar.db"
         viewer = ModernCalendarViewer(db_path)
         success = viewer.show()
         
