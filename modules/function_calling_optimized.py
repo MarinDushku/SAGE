@@ -780,7 +780,7 @@ class OptimizedFunctionRegistry:
     def _show_weekly_calendar_optimized(self) -> Dict[str, Any]:
         """Show optimized weekly calendar"""
         try:
-            from modules.calendar_viewer_optimized import show_weekly_calendar
+            from modules.modern_calendar_viewer import show_weekly_calendar
             result = show_weekly_calendar(self.calendar_module)
             return result
         except ImportError:
@@ -792,7 +792,7 @@ class OptimizedFunctionRegistry:
     def _show_monthly_calendar_optimized(self) -> Dict[str, Any]:
         """Show optimized monthly calendar"""
         try:
-            from modules.calendar_viewer_optimized import show_monthly_calendar
+            from modules.modern_calendar_viewer import show_monthly_calendar
             result = show_monthly_calendar(self.calendar_module)
             return result
         except ImportError:

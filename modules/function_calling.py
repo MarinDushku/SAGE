@@ -568,7 +568,7 @@ class FunctionRegistry:
     def _show_weekly_calendar(self) -> str:
         """Show weekly calendar GUI"""
         try:
-            from modules.calendar_viewer import show_weekly_calendar
+            from modules.modern_calendar_viewer import show_weekly_calendar
             result = show_weekly_calendar(self.calendar_module)
             
             if result.get('success'):
@@ -585,7 +585,7 @@ class FunctionRegistry:
     def _show_monthly_calendar(self) -> str:
         """Show monthly calendar GUI"""
         try:
-            from modules.calendar_viewer import show_monthly_calendar
+            from modules.modern_calendar_viewer import show_monthly_calendar
             result = show_monthly_calendar(self.calendar_module)
             
             if result.get('success'):

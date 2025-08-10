@@ -27,7 +27,6 @@ from urllib.parse import quote
 
 # Performance monitoring
 import time
-import psutil
 from functools import lru_cache, wraps
 
 
@@ -50,6 +49,26 @@ class Priority(Enum):
     HIGH = 3
     MEDIUM = 2
     LOW = 1
+    
+    @classmethod
+    def from_legacy_string(cls, value: Union[str, int, 'Priority']) -> 'Priority':
+        """Convert legacy string values to Priority enum"""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, int):
+            for priority in cls:
+                if priority.value == value:
+                    return priority
+            return cls.MEDIUM
+        if isinstance(value, str):
+            mapping = {
+                'urgent': cls.URGENT,
+                'high': cls.HIGH, 
+                'medium': cls.MEDIUM,
+                'low': cls.LOW
+            }
+            return mapping.get(value.lower(), cls.MEDIUM)
+        return cls.MEDIUM
 
 
 @dataclass(frozen=True)  # Immutable for security
@@ -196,7 +215,7 @@ class SecureDatabase:
                             start_time=datetime.fromtimestamp(row['start_time']),
                             end_time=datetime.fromtimestamp(row['end_time']),
                             event_type=EventType(row['event_type']),
-                            priority=Priority(row['priority']),
+                            priority=Priority.from_legacy_string(row['priority']),
                             description=row['description'] or "",
                             location=row['location'] or ""
                         )
@@ -1188,6 +1207,43 @@ class ModernCalendarViewer:
                 self._window.destroy()
         except Exception as e:
             self._logger.error(f"Error during close: {e}")
+
+
+# Function exports for SAGE integration
+def show_weekly_calendar(calendar_module=None) -> Dict[str, Any]:
+    """Show modern weekly calendar GUI - SAGE function calling integration"""
+    try:
+        db_path = "/home/marin/SAGE/data/calendar.db"
+        viewer = ModernCalendarViewer(db_path)
+        success = viewer.show()
+        
+        return {
+            "success": success,
+            "result": "Modern weekly calendar opened in a new window." if success else "Failed to open modern weekly calendar"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error opening modern weekly calendar: {str(e)}"
+        }
+
+
+def show_monthly_calendar(calendar_module=None) -> Dict[str, Any]:
+    """Show modern monthly calendar GUI - SAGE function calling integration"""
+    try:
+        db_path = "/home/marin/SAGE/data/calendar.db"
+        viewer = ModernCalendarViewer(db_path)
+        success = viewer.show()
+        
+        return {
+            "success": success,
+            "result": "Modern monthly calendar opened in a new window." if success else "Failed to open modern monthly calendar"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error opening modern monthly calendar: {str(e)}"
+        }
 
 
 # Main entry point
