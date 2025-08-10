@@ -395,19 +395,24 @@ class ModernCalendarViewer:
         return self._current_date - timedelta(days=self._current_date.weekday())
     
     @PerformanceMonitor().time_operation("show_calendar")
-    def show(self) -> bool:
+    def show(self, threaded: bool = True) -> bool:
         """Display the calendar with error handling"""
         try:
             if self._window and self._window.winfo_exists():
                 self._window.lift()
                 return True
             
-            # Run GUI in separate thread to avoid blocking
-            gui_thread = threading.Thread(
-                target=self._run_calendar_gui,
-                daemon=True
-            )
-            gui_thread.start()
+            if threaded:
+                # Run GUI in separate thread to avoid blocking (for SAGE integration)
+                gui_thread = threading.Thread(
+                    target=self._run_calendar_gui,
+                    daemon=True
+                )
+                gui_thread.start()
+            else:
+                # Run directly in main thread (for standalone use)
+                self._run_calendar_gui()
+            
             return True
             
         except Exception as e:
@@ -1332,7 +1337,7 @@ def launch_modern_calendar():
         
         # Create and show calendar
         calendar = ModernCalendarViewer()
-        calendar.show()
+        calendar.show(threaded=False)  # Run in main thread for standalone use
         
     except Exception as e:
         logging.error(f"Failed to launch calendar: {e}")
