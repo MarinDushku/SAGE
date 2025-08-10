@@ -141,18 +141,11 @@ class WeeklyCalendarViewer:
         self.window.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
     
     def _on_window_resize(self, event):
-        """Handle window resize smoothly without glitches"""
-        # Only handle resize events for the main window, not child widgets
+        """Handle window resize naturally like desktop apps"""
+        # Only handle resize events for the main window
         if event.widget == self.window:
-            # Update canvas scroll region when window is resized
-            if hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame'):
-                self.window.after_idle(self._update_scroll_region)
-    
-    def _update_scroll_region(self):
-        """Update the scroll region after resize"""
-        if hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame'):
-            self.scrollable_frame.update_idletasks()
-            self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
+            # Canvas will handle resizing naturally through configure bindings
+            pass
     
     def _create_modern_header(self):
         """Create modern header with elegant navigation"""
@@ -321,63 +314,69 @@ class WeeklyCalendarViewer:
         month_btn.pack(side=tk.LEFT, padx=2)
     
     def _create_modern_calendar_grid(self):
-        """Create the modern calendar grid with beautiful styling"""
-        # Main calendar container
+        """Create natural scrolling calendar with proper desktop app behavior"""
+        # Main calendar container  
         calendar_container = tk.Frame(self.main_frame, bg=self.colors['background'])
         calendar_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(15, 20))
         
-        # Create scrollable canvas with modern styling
+        # Create canvas but with proper native scrolling behavior
         self.calendar_canvas = tk.Canvas(
-            calendar_container, 
+            calendar_container,
             bg=self.colors['background'],
             highlightthickness=0,
-            border=0
+            border=0,
+            relief='flat'
         )
         
-        # Modern scrollbar
+        # Native scrollbar that behaves like normal apps
         scrollbar = ttk.Scrollbar(
-            calendar_container, 
-            orient="vertical", 
+            calendar_container,
+            orient="vertical",
             command=self.calendar_canvas.yview
         )
-        
-        # Scrollable frame - store reference for smooth updates
-        self.scrollable_frame = tk.Frame(self.calendar_canvas, bg=self.colors['background'])
-        
-        # Configure scrolling
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
-        )
-        
-        self.calendar_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.calendar_canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Get events for the week
-        events = self._get_week_events(self.current_start_date)
+        # Scrollable frame
+        self.scrollable_frame = tk.Frame(self.calendar_canvas, bg=self.colors['background'])
         
-        # Create the modern time grid
+        # Pack scrollbar and canvas for natural resizing
+        scrollbar.pack(side="right", fill="y")
+        self.calendar_canvas.pack(side="left", fill="both", expand=True)
+        
+        # Create window in canvas
+        self.canvas_window = self.calendar_canvas.create_window(
+            0, 0, 
+            anchor="nw", 
+            window=self.scrollable_frame
+        )
+        
+        # Natural scrolling and resizing behavior
+        def configure_scroll_region(event=None):
+            self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
+        
+        def configure_canvas_width(event):
+            # Make the canvas window the same width as the canvas
+            canvas_width = self.calendar_canvas.winfo_width()
+            self.calendar_canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+        # Bind for natural behavior
+        self.scrollable_frame.bind('<Configure>', configure_scroll_region)
+        self.calendar_canvas.bind('<Configure>', configure_canvas_width)
+        
+        # Native mouse wheel scrolling (Windows-like behavior)
+        def _on_mousewheel(event):
+            self.calendar_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        # Bind to main window for global scrolling
+        self.window.bind("<MouseWheel>", _on_mousewheel)
+        
+        # Get events and create calendar
+        events = self._get_week_events(self.current_start_date)
         self._create_modern_time_grid(self.scrollable_frame, events)
         
-        # Pack components
-        self.calendar_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Smooth mouse wheel scrolling
-        def _on_mousewheel(event):
-            # Only scroll if canvas exists and has content
-            if hasattr(self, 'calendar_canvas') and self.calendar_canvas.winfo_exists():
-                self.calendar_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        # Bind scrolling only to canvas and its children
-        self.calendar_canvas.bind("<MouseWheel>", _on_mousewheel)
-        self.scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
-        
-        # Bind focus events to ensure scrolling works
-        def _on_enter(event):
-            self.calendar_canvas.focus_set()
-        
-        self.calendar_canvas.bind("<Enter>", _on_enter)
+        # Update scroll region after content is created
+        self.scrollable_frame.update_idletasks()
+        configure_scroll_region()
     
     def _create_modern_time_grid(self, parent_frame, events):
         """Optimized time grid creation with batch operations"""
@@ -765,32 +764,28 @@ class WeeklyCalendarViewer:
         self.header_subtitle_label.config(text=subtitle_text)
     
     def _update_calendar_content(self):
-        """Ultra-fast calendar content update"""
+        """Natural calendar content update with proper scrolling"""
         if not (hasattr(self, 'calendar_canvas') and hasattr(self, 'scrollable_frame')):
             return
         
-        # Clear cache for new week
-        cache_key = self.current_start_date.strftime('%Y-%m-%d')
-        if cache_key in self.events_cache:
-            del self.events_cache[cache_key]
-        
-        # Disable updates temporarily for batch operation
-        self.scrollable_frame.update_idletasks = lambda: None
-        
-        # Clear existing content efficiently
+        # Clear existing content
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         
-        # Get new events with caching
+        # Get new events (with caching)
         events = self._get_week_events(self.current_start_date)
         
-        # Recreate content with optimized methods
+        # Recreate content
         self._create_modern_time_grid(self.scrollable_frame, events)
         
-        # Re-enable updates and update once
-        self.scrollable_frame.update_idletasks = tk.Frame.update_idletasks.__get__(self.scrollable_frame)
+        # Update canvas for natural scrolling behavior
         self.scrollable_frame.update_idletasks()
         self.calendar_canvas.configure(scrollregion=self.calendar_canvas.bbox("all"))
+        
+        # Ensure proper width
+        if hasattr(self, 'canvas_window'):
+            canvas_width = self.calendar_canvas.winfo_width()
+            self.calendar_canvas.itemconfig(self.canvas_window, width=canvas_width)
     
     def _show_event_details(self, event):
         """Show detailed event information in a modern dialog"""
